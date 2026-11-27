@@ -14,12 +14,15 @@ service cloud.firestore {
 
     match /usuarios/{uid} {
       allow read: if ativo() || (logado() && request.auth.uid == uid);
-      // O administrador cria usuários. Exceção: o 1º acesso cria o próprio administrador, uma única vez.
-      allow create: if admin()
+      // Só existe um administrador (o do 1º acesso, criado uma única vez).
+      // Ele cria usuários, sempre como operador.
+      allow create: if (admin() && request.resource.data.papel == 'operador')
         || (logado() && request.auth.uid == uid && semAdmin()
             && request.resource.data.papel == 'admin' && request.resource.data.ativo == true);
-      // Administrador muda papel/ativa/desativa; ninguém se promove sozinho.
-      allow update: if admin();
+      // Administrador renomeia, ativa e desativa; o nível nunca muda e ele não se desativa.
+      allow update: if admin()
+        && request.resource.data.papel == resource.data.papel
+        && (uid != request.auth.uid || request.resource.data.ativo == true);
       allow delete: if false;
     }
 
