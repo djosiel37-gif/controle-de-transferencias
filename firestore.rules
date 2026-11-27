@@ -1,0 +1,65 @@
+rules_version = '2';
+
+// Regras de acesso do banco. Copie este arquivo inteiro em:
+// Console do Firebase → Firestore Database → Regras → Publicar.
+service cloud.firestore {
+  match /databases/{banco}/documents {
+
+    function logado() { return request.auth != null; }
+    function caminhoPerfil() { return /databases/$(banco)/documents/usuarios/$(request.auth.uid); }
+    function perfil() { return get(caminhoPerfil()).data; }
+    function ativo() { return logado() && exists(caminhoPerfil()) && perfil().ativo == true; }
+    function admin() { return ativo() && perfil().papel == 'admin'; }
+    function semAdmin() { return !exists(/databases/$(banco)/documents/config/inicial); }
+
+    match /usuarios/{uid} {
+      allow read: if ativo() || (logado() && request.auth.uid == uid);
+      // O administrador cria usuários. Exceção: o 1º acesso cria o próprio administrador, uma única vez.
+      allow create: if admin()
+        || (logado() && request.auth.uid == uid && semAdmin()
+            && request.resource.data.papel == 'admin' && request.resource.data.ativo == true);
+      // Administrador muda papel/ativa/desativa; ninguém se promove sozinho.
+      allow update: if admin();
+      allow delete: if false;
+    }
+
+    match /config/{item} {
+      // "inicial" marca que o 1º administrador já existe; a tela de login precisa ler isso.
+      allow get: if item == 'inicial' || ativo();
+      allow list: if ativo();
+      allow create: if (item == 'inicial' && semAdmin()
+                        && getAfter(caminhoPerfil()).data.papel == 'admin')
+                    || (item != 'inicial' && admin());
+      allow update: if item != 'inicial' && admin();
+      allow delete: if item != 'inicial' && admin();
+    }
+
+    match /fazendas/{id} {
+      allow read: if ativo();
+      allow write: if admin();
+    }
+
+    match /maquinas/{id} {
+      allow read: if ativo();
+      allow create, delete: if admin();
+      // Operador também atualiza a máquina (situação e fazenda mudam nas transferências e consertos).
+      allow update: if ativo();
+    }
+
+    match /transferencias/{id} {
+      allow read, create, update: if ativo();
+      allow delete: if admin();
+    }
+
+    match /consertos/{id} {
+      allow read, create, update: if ativo();
+      allow delete: if admin();
+    }
+
+    match /fotos/{id} {
+      allow read, create: if ativo();
+      allow update: if false;
+      allow delete: if admin();
+    }
+  }
+}

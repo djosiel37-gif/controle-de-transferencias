@@ -1,4 +1,6 @@
-/* Controle de Transferências — app principal (sem dependências externas). */
+/* Controle de Transferências — app principal. */
+import { firebaseConfig } from './firebase-config.js';
+import { iniciar, sessao, DB, normalizarUsuario } from './db.js';
 
 // ---------- Utilidades ----------
 const $ = (sel, raiz = document) => raiz.querySelector(sel);
@@ -63,7 +65,7 @@ const nomeMaquina = (d, id) => (d.mq[id] ? `${d.mq[id].codigo ? d.mq[id].codigo 
 const porData = (campo) => (a, b) => String(b[campo] || '').localeCompare(String(a[campo] || ''));
 
 // ---------- Fotos (comprimidas para caber no aparelho) ----------
-function comprimirFoto(arquivo, max = 1280, qualidade = 0.65) {
+function comprimirFoto(arquivo, max = 1024, qualidade = 0.6) {
   return new Promise((ok, erro) => {
     const img = new Image();
     const url = URL.createObjectURL(arquivo);
@@ -134,7 +136,7 @@ function ligarFotos(form) {
   });
 }
 
-function lerChecklist(form, itens, prefixo) {
+async function lerChecklist(form, itens, prefixo) {
   const fd = new FormData(form);
   const respostas = {};
   for (const it of itens) {
@@ -147,7 +149,7 @@ function lerChecklist(form, itens, prefixo) {
     respostas,
     responsavel: fd.get(`${prefixo}_responsavel`) || '',
     obs: fd.get(`${prefixo}_obs`) || '',
-    fotos: fotosPendentes[prefixo] || [],
+    fotoIds: await Promise.all((fotosPendentes[prefixo] || []).map((f) => DB.salvarFoto(f))),
     data: fd.get(`${prefixo}_data`) || hojeISO()
   };
 }
@@ -190,6 +192,7 @@ function htmlChecklistLeitura(ck, titulo, outro) {
       }).join('')}</table>
       ${ck.obs ? `<p><b>Obs.:</b> ${esc(ck.obs)}</p>` : ''}
       ${ck.fotos && ck.fotos.length ? `<div class="fotos">${ck.fotos.map((s) => `<a href="${s}" target="_blank"><img src="${s}" alt="foto"></a>`).join('')}</div>` : ''}
+      ${ck.fotoIds && ck.fotoIds.length ? `<div class="fotos">${ck.fotoIds.map((id) => `<img data-foto="${esc(id)}" alt="carregando foto">`).join('')}</div>` : ''}
     </div>`;
 }
 
@@ -210,7 +213,8 @@ telas.inicio = async (_0, _1, ctx) => {
   const oficina = d.consertos.filter((c) => c.status === 'oficina').sort(porData('dataEnvio'));
   const hoje = new Date().toISOString().slice(0, 10);
   const semCadastro = !d.fazendas.length
-    ? `<div class="aviso">Comece cadastrando as fazendas em <a href="#/mais">Mais → Fazendas</a> e depois as máquinas.</div>` : '';
+    ? (sessao.admin ? `<div class="aviso">Comece cadastrando as fazendas em <a href="#/mais">Mais → Fazendas</a> e depois as máquinas.</div>`
+      : `<div class="aviso">Ainda não há fazendas cadastradas. Peça ao administrador.</div>`) : '';
   return `
     ${semCadastro}
     <div class="resumo">
@@ -251,7 +255,7 @@ telas.maquinas = async (_0, _1, ctx) => {
     });
   });
   return `
-    <div class="linha"><h2>Máquinas e equipamentos</h2><a class="botao" href="#/maquinas/nova">+ Nova</a></div>
+    <div class="linha"><h2>Máquinas e equipamentos</h2>${sessao.admin ? '<a class="botao" href="#/maquinas/nova">+ Nova</a>' : ''}</div>
     <input id="busca" class="busca" placeholder="Buscar por código, nome, fazenda…">
     ${lista.length ? lista.map((m) => `
       <a class="cartao" href="#/maquinas/${m.id}" data-busca="${esc([m.codigo, m.nome, m.tipo, m.marca, nomeFazenda(d, m.fazendaId)].join(' ').toLowerCase())}">
@@ -261,6 +265,7 @@ telas.maquinas = async (_0, _1, ctx) => {
 };
 
 telas.maquinaForm = async (id, _1, ctx) => {
+  if (!sessao.admin) return '<p>Só o administrador pode fazer isso.</p>';
   const d = await carregarTudo();
   const m = id ? d.mq[id] : { status: 'disponivel' };
   if (!m) return '<p>Máquina não encontrada.</p>';
@@ -329,7 +334,7 @@ telas.maquina = async (id, _1, ctx) => {
       ${livre ? `<a class="botao" href="#/transferencias/nova?maquina=${id}">Transferir</a>
       <a class="botao sec" href="#/consertos/novo?maquina=${id}">Enviar p/ conserto</a>` : '<span class="suave">Ações liberadas quando a máquina estiver de volta a uma fazenda.</span>'}
     </div>
-    <div class="acoes"><a class="botao sec" href="#/maquinas/${id}/editar">Editar cadastro</a></div>
+    ${sessao.admin ? `<div class="acoes"><a class="botao sec" href="#/maquinas/${id}/editar">Editar cadastro</a></div>` : ''}
     <h3>Histórico</h3>
     ${eventos.length ? `<div class="tl">${eventos.map((e) => e.html).join('')}</div>` : '<p class="vazio">Sem movimentações ainda.</p>'}`;
 };
@@ -374,7 +379,7 @@ telas.transferenciaNova = async (_, params, ctx) => {
         transporte: form.transporte.value,
         motorista: form.motorista.value,
         dataSaida: form.saida_data.value,
-        saida: lerChecklist(form, itens, 'saida'),
+        saida: await lerChecklist(form, itens, 'saida'),
         status: 'transito'
       };
       await DB.salvar('transferencias', t);
@@ -411,6 +416,7 @@ function ultimaMovimentacao(d, maquinaId, idRegistro) {
 async function cancelarRegistro(d, loja, reg, msg) {
   if (!confirm(msg)) return;
   await DB.remover(loja, reg.id);
+  for (const ck of [reg.saida, reg.chegada, reg.retorno]) (ck && ck.fotoIds || []).forEach(DB.removerFoto);
   const m = d.mq[reg.maquinaId];
   if (m) await DB.salvar('maquinas', { ...m, status: 'disponivel', fazendaId: reg.origemId });
   location.hash = m ? `#/maquinas/${m.id}` : '#/';
@@ -433,12 +439,13 @@ telas.transferencia = async (id, _1, ctx) => {
       <div>${esc(nomeFazenda(d, t.origemId))} → <b>${esc(nomeFazenda(d, t.destinoId))}</b></div>
       ${t.transporte ? `<div class="suave">Transporte: ${esc(t.transporte)}</div>` : ''}
       ${t.motorista ? `<div class="suave">Motorista/operador: ${esc(t.motorista)}</div>` : ''}
+      ${t.criadoPor ? `<div class="suave">Lançado por ${esc(t.criadoPor.nome)}${t.chegada && t.atualizadoPor ? ' · chegada lançada por ' + esc(t.atualizadoPor.nome) : ''}</div>` : ''}
     </div>
     ${t.status === 'transito' ? `<div class="acoes"><a class="botao" href="#/transferencias/${id}/chegada">Registrar chegada</a></div>` : ''}
     ${htmlChecklistLeitura(t.saida, 'Checklist de saída')}
     ${htmlChecklistLeitura(t.chegada, 'Checklist de chegada', t.saida)}
     <div class="acoes"><button class="sec" onclick="window.print()">Imprimir / PDF</button></div>
-    ${podeCancelar ? '<div class="acoes"><button class="perigo" id="btn-cancelar">Cancelar transferência</button></div>'
+    ${!sessao.admin ? '' : podeCancelar ? '<div class="acoes"><button class="perigo" id="btn-cancelar">Cancelar transferência</button></div>'
       : '<p class="suave">Só dá para cancelar a última movimentação da máquina.</p>'}`;
 };
 
@@ -452,7 +459,7 @@ telas.transferenciaChegada = async (id, _1, ctx) => {
     ligarFotos(form);
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
-      t.chegada = lerChecklist(form, itens, 'chegada');
+      t.chegada = await lerChecklist(form, itens, 'chegada');
       t.status = 'recebida';
       await DB.salvar('transferencias', t);
       const m = d.mq[t.maquinaId];
@@ -511,7 +518,7 @@ telas.consertoNovo = async (_, params, ctx) => {
         dataEnvio: fd.get('saida_data'),
         orcamento: num(fd.get('orcamento')),
         prazo: fd.get('prazo'),
-        saida: lerChecklist(form, itens, 'saida'),
+        saida: await lerChecklist(form, itens, 'saida'),
         status: 'oficina'
       };
       await DB.salvar('consertos', c);
@@ -565,6 +572,7 @@ telas.conserto = async (id, _1, ctx) => {
       <div><a href="#/maquinas/${c.maquinaId}"><b>${esc(nomeMaquina(d, c.maquinaId))}</b></a></div>
       <div>Oficina: <b>${esc(c.oficina)}</b>${c.cidade ? ' · ' + esc(c.cidade) : ''}</div>
       ${c.contato ? `<div class="suave">Contato: ${esc(c.contato)}</div>` : ''}
+      ${c.criadoPor ? `<div class="suave">Lançado por ${esc(c.criadoPor.nome)}${c.atualizadoPor && c.atualizadoPor.uid !== c.criadoPor.uid ? ' · última alteração: ' + esc(c.atualizadoPor.nome) : ''}</div>` : ''}
       <div>Defeito: ${esc(c.defeito)}</div>
       <div class="suave">Saiu de ${esc(nomeFazenda(d, c.origemId))} em ${dataBR(c.dataEnvio)}</div>
       <div class="suave">Orçamento: ${reais(c.orcamento)} · Prazo: ${dataBR(c.prazo)}</div>
@@ -585,7 +593,7 @@ telas.conserto = async (id, _1, ctx) => {
     ${htmlChecklistLeitura(c.saida, 'Checklist de envio')}
     ${htmlChecklistLeitura(c.retorno, 'Checklist de retorno', c.saida)}
     <div class="acoes"><button class="sec" onclick="window.print()">Imprimir / PDF</button></div>
-    ${podeCancelar ? '<div class="acoes"><button class="perigo" id="btn-cancelar">Excluir conserto</button></div>'
+    ${!sessao.admin ? '' : podeCancelar ? '<div class="acoes"><button class="perigo" id="btn-cancelar">Excluir conserto</button></div>'
       : '<p class="suave">Só dá para excluir a última movimentação da máquina.</p>'}`;
 };
 
@@ -600,7 +608,7 @@ telas.consertoRetorno = async (id, _1, ctx) => {
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const fd = new FormData(form);
-      c.retorno = lerChecklist(form, itens, 'retorno');
+      c.retorno = await lerChecklist(form, itens, 'retorno');
       c.custoFinal = num(fd.get('custoFinal'));
       c.nf = fd.get('nf');
       c.servico = fd.get('servico');
@@ -632,6 +640,7 @@ telas.consertoRetorno = async (id, _1, ctx) => {
 
 // --- Fazendas ---
 telas.fazendaForm = async (id, _1, ctx) => {
+  if (!sessao.admin) return '<p>Só o administrador pode fazer isso.</p>';
   const f = id ? await DB.obter('fazendas', id) : {};
   if (!f) return '<p>Fazenda não encontrada.</p>';
   ctx.depois(() => {
@@ -651,16 +660,34 @@ telas.fazendaForm = async (id, _1, ctx) => {
     </form>`;
 };
 
-// --- Mais: fazendas, checklist, exportação, backup ---
+// --- Mais: conta, usuários, fazendas, checklist, exportação ---
 telas.mais = async (_0, _1, ctx) => {
   const d = await carregarTudo();
   const itens = await checklistModelo();
+  const adm = sessao.admin;
+  const eu = sessao.perfil || {};
+  const antigos = adm ? await lerBancoAntigo() : null;
   ctx.depois(() => {
+    $('#btn-sair').onclick = async () => { if (confirm('Sair da conta neste aparelho?')) await sessao.sair(); };
+    $('#form-senha').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const f = e.target;
+      if (f.nova.value !== f.nova2.value) return alert('A senha nova e a confirmação não batem.');
+      try { await sessao.trocarSenha(f.atual.value, f.nova.value); alert('Senha trocada.'); f.reset(); }
+      catch (err) { alert(err.message); }
+    });
     $('#btn-csv-t').onclick = () => exportarTransferencias(d);
     $('#btn-csv-c').onclick = () => exportarConsertos(d);
     $('#btn-csv-m').onclick = () => exportarMaquinas(d);
+    if (!adm) return;
     $('#btn-backup').onclick = exportarBackup;
     $('#inp-backup').onchange = importarBackup;
+    const ba = $('#btn-antigo');
+    if (ba) ba.onclick = async () => {
+      try {
+        if (await importarDados(antigos)) { try { localStorage.setItem('ct-antigo-importado', '1'); } catch {} }
+      } catch (err) { alert('Não foi possível importar: ' + err.message); }
+    };
     $('#form-ck').addEventListener('submit', async (e) => {
       e.preventDefault();
       const novos = $$('.ck-linha').map((l) => ({
@@ -669,7 +696,7 @@ telas.mais = async (_0, _1, ctx) => {
         tipo: $('.ck-tipo', l).value
       })).filter((i) => i.rotulo);
       await DB.salvar('config', { id: 'checklist', itens: novos });
-      alert('Checklist salvo. Vale para os próximos registros.');
+      alert('Checklist salvo. Vale para os próximos registros, em todos os aparelhos.');
       render();
     });
     $('#ck-add').onclick = () => {
@@ -689,16 +716,38 @@ telas.mais = async (_0, _1, ctx) => {
       <select class="ck-tipo" style="flex:1">${Object.entries(tipos).map(([k, v]) => `<option value="${k}" ${k === i.tipo ? 'selected' : ''}>${v}</option>`).join('')}</select>
       <button type="button" class="ck-del perigo" aria-label="Remover" style="padding:10px 12px">✕</button>
     </div>`;
-  window.linhaCk = linhaCk;
   return `
-    <div class="linha"><h2>Fazendas</h2><a class="botao" href="#/fazendas/nova">+ Nova</a></div>
+    <h2>Minha conta</h2>
+    <div class="cartao">
+      <div class="linha"><b>${esc(eu.nome)}</b><span class="etiqueta ${adm ? 'e-transito' : 'e-ok'}">${adm ? 'Administrador' : 'Operador'}</span></div>
+      <div class="suave">Usuário: ${esc(eu.usuario)}</div>
+      <details style="margin-top:8px"><summary>Trocar minha senha</summary>
+        <form id="form-senha">
+          <label>Senha atual</label><input type="password" name="atual" required autocomplete="current-password">
+          <label>Senha nova (mínimo 6)</label><input type="password" name="nova" required minlength="6" autocomplete="new-password">
+          <label>Repita a senha nova</label><input type="password" name="nova2" required minlength="6" autocomplete="new-password">
+          <div class="acoes"><button>Trocar senha</button></div>
+        </form>
+      </details>
+      <div class="acoes"><button class="sec" id="btn-sair">Sair</button></div>
+    </div>
+
+    ${adm ? `<div class="linha" style="margin-top:24px"><h2>Usuários</h2><a class="botao" href="#/usuarios/novo">+ Novo</a></div>
+    ${(await DB.todos('usuarios')).sort((a, b) => (a.nome || '').localeCompare(b.nome || '')).map((u) => `
+      <a class="cartao" href="#/usuarios/${u.id}">
+        <div class="linha"><b>${esc(u.nome)}</b>
+          <span class="etiqueta ${u.ativo === false ? 'e-erro' : u.papel === 'admin' ? 'e-transito' : 'e-ok'}">${u.ativo === false ? 'Desativado' : u.papel === 'admin' ? 'Administrador' : 'Operador'}</span></div>
+        <div class="suave">${esc(u.usuario)}</div>
+      </a>`).join('')}` : ''}
+
+    <div class="linha" style="margin-top:24px"><h2>Fazendas</h2>${adm ? '<a class="botao" href="#/fazendas/nova">+ Nova</a>' : ''}</div>
     ${d.fazendas.length ? d.fazendas.sort((a, b) => a.nome.localeCompare(b.nome)).map((f) => `
-      <a class="cartao" href="#/fazendas/${f.id}/editar">
+      <${adm ? `a href="#/fazendas/${f.id}/editar"` : 'div'} class="cartao">
         <div class="linha"><b>${esc(f.nome)}</b><span class="suave">${d.maquinas.filter((m) => m.fazendaId === f.id && (m.status || 'disponivel') === 'disponivel').length} máquinas</span></div>
         <div class="suave">${esc(f.municipio || '')}${f.responsavel ? ' · ' + esc(f.responsavel) : ''}</div>
-      </a>`).join('') : '<p class="vazio">Nenhuma fazenda cadastrada.</p>'}
+      </${adm ? 'a' : 'div'}>`).join('') : '<p class="vazio">Nenhuma fazenda cadastrada.</p>'}
 
-    <h2 style="margin-top:24px">Itens do checklist</h2>
+    ${adm ? `<h2 style="margin-top:24px">Itens do checklist</h2>
     <p class="suave">Responsável, observações e fotos sempre entram. Mudanças valem só para registros novos.</p>
     <form id="form-ck" class="cartao">
       <div id="ck-lista">${itens.map(linhaCk).join('')}</div>
@@ -707,7 +756,7 @@ telas.mais = async (_0, _1, ctx) => {
         <button>Salvar checklist</button>
       </div>
       <button type="button" class="sec" id="ck-reset" style="width:100%">Restaurar padrão</button>
-    </form>
+    </form>` : ''}
 
     <h2 style="margin-top:24px">Exportar planilhas (CSV)</h2>
     <p class="suave">Abre no Excel ou Google Planilhas.</p>
@@ -717,13 +766,86 @@ telas.mais = async (_0, _1, ctx) => {
       <button class="sec" id="btn-csv-m">Máquinas</button>
     </div>
 
-    <h2 style="margin-top:24px">Backup</h2>
-    <div class="aviso">Os dados ficam só neste aparelho. Se limpar o navegador ou perder o celular, perde tudo. Faça backup com frequência e guarde o arquivo no Drive ou WhatsApp.</div>
+    ${antigos ? `<div class="aviso" style="margin-top:24px"><b>Este aparelho tem dados da versão antiga do app</b>
+      (${(antigos.maquinas || []).length} máquinas, ${(antigos.transferencias || []).length} transferências, ${(antigos.consertos || []).length} consertos).
+      <div class="acoes"><button id="btn-antigo">Enviar para o servidor</button></div></div>` : ''}
+    ${adm ? `<h2 style="margin-top:24px">Cópia e importação</h2>
+    <p class="suave">Os dados ficam no servidor e em todos os aparelhos. A cópia em arquivo é opcional (não leva as fotos).
+    "Importar" traz um backup da versão antiga do app (que guardava só no celular) e <b>soma</b> aos dados atuais.</p>
     <div class="acoes">
-      <button id="btn-backup">Baixar backup</button>
-      <label class="botao sec" style="margin:0">Restaurar backup<input type="file" id="inp-backup" accept=".json,application/json" hidden></label>
-    </div>
-    <p class="suave" style="text-align:center;margin-top:24px">Controle de Transferências · v4</p>`;
+      <button class="sec" id="btn-backup">Baixar cópia</button>
+      <label class="botao sec" style="margin:0">Importar backup<input type="file" id="inp-backup" accept=".json,application/json" hidden></label>
+    </div>` : ''}
+    <p class="suave" style="text-align:center;margin-top:24px">Controle de Transferências · v5</p>`;
+};
+
+// --- Usuários (só administrador) ---
+telas.usuarioNovo = async (_0, _1, ctx) => {
+  if (!sessao.admin) return '<p>Só o administrador cria usuários.</p>';
+  ctx.depois(() => {
+    const f = $('#form');
+    f.usuario.addEventListener('input', () => { $('#usr-prev').textContent = normalizarUsuario(f.usuario.value) || '—'; });
+    f.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!normalizarUsuario(f.usuario.value)) return alert('Informe um usuário válido.');
+      const b = $('button', f); b.disabled = true; b.textContent = 'Criando…';
+      try {
+        await sessao.criarUsuario({ nome: f.nome.value, usuario: f.usuario.value, senha: f.senha.value, papel: f.papel.value });
+        alert(`Usuário criado. Passe para a pessoa:\nUsuário: ${normalizarUsuario(f.usuario.value)}\nSenha: ${f.senha.value}`);
+        location.hash = '#/mais';
+      } catch (err) {
+        alert(err.message); b.disabled = false; b.textContent = 'Criar usuário';
+      }
+    });
+  });
+  return `
+    <h2>Novo usuário</h2>
+    <p class="suave">Precisa de internet. A pessoa entra com o usuário e a senha que você definir e pode trocar a senha depois.</p>
+    <form id="form">
+      <label>Nome completo *</label><input name="nome" required>
+      <label>Usuário para entrar *</label><input name="usuario" required autocapitalize="none" placeholder="ex: joao.silva">
+      <div class="suave">Vai ficar: <b id="usr-prev">—</b></div>
+      <label>Senha inicial * (mínimo 6)</label><input name="senha" required minlength="6">
+      <label>Nível *</label>
+      <select name="papel">
+        <option value="operador">Operador: lança e recebe transferências e consertos</option>
+        <option value="admin">Administrador: tudo, inclusive cadastros, usuários e cancelamentos</option>
+      </select>
+      <div class="acoes"><button>Criar usuário</button><a class="botao sec" href="#/mais">Cancelar</a></div>
+    </form>`;
+};
+
+telas.usuario = async (id, _1, ctx) => {
+  if (!sessao.admin) return '<p>Só o administrador gerencia usuários.</p>';
+  const u = await DB.obter('usuarios', id);
+  if (!u) return '<p>Usuário não encontrado.</p>';
+  const souEu = sessao.perfil && sessao.perfil.id === id;
+  ctx.depois(() => {
+    $('#form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const f = e.target;
+      await DB.salvar('usuarios', { ...u, nome: f.nome.value.trim(), papel: souEu ? u.papel : f.papel.value, ativo: souEu ? true : f.ativo.value === 'sim' });
+      location.hash = '#/mais';
+    });
+  });
+  return `
+    <h2>${esc(u.nome)}</h2>
+    <p class="suave">Usuário: <b>${esc(u.usuario)}</b>. Para quem esqueceu a senha: desative este e crie um usuário novo.</p>
+    <form id="form">
+      <label>Nome</label><input name="nome" value="${esc(u.nome)}" required>
+      <label>Nível</label>
+      <select name="papel" ${souEu ? 'disabled' : ''}>
+        <option value="operador" ${u.papel !== 'admin' ? 'selected' : ''}>Operador</option>
+        <option value="admin" ${u.papel === 'admin' ? 'selected' : ''}>Administrador</option>
+      </select>
+      <label>Acesso</label>
+      <select name="ativo" ${souEu ? 'disabled' : ''}>
+        <option value="sim" ${u.ativo !== false ? 'selected' : ''}>Ativo</option>
+        <option value="nao" ${u.ativo === false ? 'selected' : ''}>Desativado (não consegue mais entrar)</option>
+      </select>
+      ${souEu ? '<p class="suave">Você não pode rebaixar nem desativar a própria conta.</p>' : ''}
+      <div class="acoes"><button>Salvar</button><a class="botao sec" href="#/mais">Cancelar</a></div>
+    </form>`;
 };
 
 // ---------- Exportação ----------
@@ -751,22 +873,22 @@ const horim = (ck) => (ck && ck.respostas.horimetro ? numBR(ck.respostas.horimet
 const carimbo = () => new Date().toISOString().slice(0, 10);
 
 function exportarTransferencias(d) {
-  const linhas = [['Máquina', 'Origem', 'Destino', 'Status', 'Saída', 'Resp. saída', 'Horímetro saída', 'Problemas na saída', 'Chegada', 'Resp. chegada', 'Horímetro chegada', 'Problemas na chegada', 'Divergências', 'Transporte', 'Motorista', 'Checklist saída', 'Checklist chegada']];
+  const linhas = [['Máquina', 'Origem', 'Destino', 'Status', 'Saída', 'Resp. saída', 'Horímetro saída', 'Problemas na saída', 'Chegada', 'Resp. chegada', 'Horímetro chegada', 'Problemas na chegada', 'Divergências', 'Transporte', 'Motorista', 'Lançado por', 'Checklist saída', 'Checklist chegada']];
   for (const t of d.transferencias.sort(porData('dataSaida'))) {
     linhas.push([nomeMaquina(d, t.maquinaId), nomeFazenda(d, t.origemId), nomeFazenda(d, t.destinoId),
       t.status === 'transito' ? 'Em trânsito' : 'Recebida', dataBR(t.dataSaida), t.saida?.responsavel, horim(t.saida), problemas(t.saida),
       t.chegada ? dataBR(t.chegada.data) : '', t.chegada?.responsavel, horim(t.chegada), problemas(t.chegada),
-      divergencias(t.saida, t.chegada).join(' | '), t.transporte, t.motorista, resumoCk(t.saida), resumoCk(t.chegada)]);
+      divergencias(t.saida, t.chegada).join(' | '), t.transporte, t.motorista, t.criadoPor?.nome, resumoCk(t.saida), resumoCk(t.chegada)]);
   }
   baixar(`transferencias-${carimbo()}.csv`, csv(linhas), 'text/csv;charset=utf-8');
 }
 function exportarConsertos(d) {
-  const linhas = [['Máquina', 'Fazenda de origem', 'Oficina', 'Cidade', 'Defeito', 'Status', 'Envio', 'Prazo', 'Orçamento', 'Retorno', 'Custo final', 'NF', 'Serviço realizado', 'Voltou para', 'Resp. envio', 'Resp. retorno']];
+  const linhas = [['Máquina', 'Fazenda de origem', 'Oficina', 'Cidade', 'Defeito', 'Status', 'Envio', 'Prazo', 'Orçamento', 'Retorno', 'Custo final', 'NF', 'Serviço realizado', 'Voltou para', 'Resp. envio', 'Resp. retorno', 'Lançado por']];
   for (const c of d.consertos.sort(porData('dataEnvio'))) {
     linhas.push([nomeMaquina(d, c.maquinaId), nomeFazenda(d, c.origemId), c.oficina, c.cidade, c.defeito,
       c.status === 'oficina' ? 'Na oficina' : 'Retornou', dataBR(c.dataEnvio), c.prazo ? dataBR(c.prazo) : '', numBR(c.orcamento),
       c.retorno ? dataBR(c.retorno.data) : '', numBR(c.custoFinal), c.nf, c.servico,
-      c.destinoId ? nomeFazenda(d, c.destinoId) : '', c.saida?.responsavel, c.retorno?.responsavel]);
+      c.destinoId ? nomeFazenda(d, c.destinoId) : '', c.saida?.responsavel, c.retorno?.responsavel, c.criadoPor?.nome]);
   }
   baixar(`consertos-${carimbo()}.csv`, csv(linhas), 'text/csv;charset=utf-8');
 }
@@ -779,29 +901,69 @@ function exportarMaquinas(d) {
   baixar(`maquinas-${carimbo()}.csv`, csv(linhas), 'text/csv;charset=utf-8');
 }
 async function exportarBackup() {
-  const dados = { app: 'controle-de-transferencias', versao: 1, geradoEm: new Date().toISOString() };
+  const dados = { app: 'controle-de-transferencias', versao: 2, geradoEm: new Date().toISOString() };
   for (const l of DB.LOJAS) dados[l] = await DB.todos(l);
-  baixar(`backup-transferencias-${carimbo()}.json`, JSON.stringify(dados), 'application/json');
+  baixar(`copia-transferencias-${carimbo()}.json`, JSON.stringify(dados), 'application/json');
 }
+// Importa (soma) um backup. Serve para trazer os dados da versão antiga, que ficavam só no celular.
 async function importarBackup(e) {
   const arq = e.target.files[0];
   if (!arq) return;
   try {
     const dados = JSON.parse(await arq.text());
     if (dados.app !== 'controle-de-transferencias') throw new Error('arquivo não é um backup deste app');
-    if (!confirm('Isso vai SUBSTITUIR todos os dados deste aparelho pelos do backup. Continuar?')) return;
-    for (const l of DB.LOJAS) {
-      await DB.limpar(l);
-      for (const obj of dados[l] || []) await DB.salvar(l, obj);
-    }
-    alert('Backup restaurado.');
-    location.hash = '#/';
-    render();
+    await importarDados(dados);
   } catch (err) {
-    alert('Não foi possível restaurar: ' + err.message);
+    alert('Não foi possível importar: ' + err.message);
   } finally {
     e.target.value = '';
   }
+}
+async function importarDados(dados) {
+    const total = DB.LOJAS.reduce((n, l) => n + (dados[l] || []).length, 0);
+    if (!confirm(`Importar ${total} registros para o servidor? Registros com o mesmo código são substituídos; os demais dados atuais continuam.`)) return false;
+    for (const l of DB.LOJAS) {
+      for (const obj of dados[l] || []) {
+        for (const k of ['saida', 'chegada', 'retorno']) {
+          const ck = obj[k];
+          if (ck && Array.isArray(ck.fotos) && ck.fotos.length) {
+            const ids = await Promise.all(ck.fotos.map((f) => DB.salvarFoto(f)));
+            obj[k] = { ...ck, fotos: [], fotoIds: [...(ck.fotoIds || []), ...ids] };
+          }
+        }
+        await DB.salvar(l, obj);
+      }
+    }
+    alert('Importado. Se estiver sem internet, os dados sobem quando o sinal voltar.');
+    location.hash = '#/';
+    return true;
+}
+
+// ---------- Dados da versão antiga (ficavam só no celular, em IndexedDB) ----------
+function lerBancoAntigo() {
+  return new Promise((ok) => {
+    try { if (localStorage.getItem('ct-antigo-importado')) return ok(null); } catch {}
+    if (!window.indexedDB) return ok(null);
+    let criou = false;
+    const req = indexedDB.open('controle-transferencias');
+    req.onupgradeneeded = () => { criou = true; }; // não existia: nada a importar
+    req.onerror = () => ok(null);
+    req.onsuccess = async () => {
+      const bd = req.result;
+      if (criou || !bd.objectStoreNames.length) { bd.close(); return ok(null); }
+      const dados = { app: 'controle-de-transferencias' };
+      for (const l of ['fazendas', 'maquinas', 'transferencias', 'consertos', 'config']) {
+        if (!bd.objectStoreNames.contains(l)) continue;
+        dados[l] = await new Promise((r) => {
+          const g = bd.transaction(l).objectStore(l).getAll();
+          g.onsuccess = () => r(g.result); g.onerror = () => r([]);
+        });
+      }
+      bd.close();
+      const total = ['fazendas', 'maquinas', 'transferencias', 'consertos'].reduce((n, l) => n + (dados[l] || []).length, 0);
+      ok(total ? dados : null);
+    };
+  });
 }
 
 // ---------- Roteador ----------
@@ -822,11 +984,17 @@ const rotas = [
   [/^\/consertos\/([^/]+)$/, 'conserto', 'consertos'],
   [/^\/fazendas\/nova$/, 'fazendaForm', 'mais'],
   [/^\/fazendas\/([^/]+)\/editar$/, 'fazendaForm', 'mais'],
+  [/^\/usuarios\/novo$/, 'usuarioNovo', 'mais'],
+  [/^\/usuarios\/([^/]+)$/, 'usuario', 'mais'],
   [/^\/mais$/, 'mais', 'mais']
 ];
+// Telas só de leitura: podem ser redesenhadas quando chega dado novo de outro aparelho.
+const TELAS_AO_VIVO = new Set(['inicio', 'maquinas', 'maquina', 'transferencias', 'transferencia', 'consertos', 'conserto']);
+let telaAtual = null;
 
 let renderAtual = 0;
-async function render() {
+async function render({ manterRolagem = false } = {}) {
+  if (!sessao.perfil) return;
   const minha = ++renderAtual;
   const bruto = location.hash.replace(/^#/, '') || '/';
   const [caminho, qs] = bruto.split('?');
@@ -836,30 +1004,130 @@ async function render() {
     const m = caminho.match(re);
     if (m) { tela = t; aba = a; arg = m[1]; break; }
   }
+  const rolagem = window.scrollY;
   try {
     const fila = [];
     const html = await telas[tela](arg, params, { depois: (fn) => fila.push(fn) });
     if (minha !== renderAtual) return; // outra tela foi aberta enquanto esta carregava
+    telaAtual = tela;
     $('#app').innerHTML = html;
     fila.forEach((fn) => fn());
+    carregarFotos();
   } catch (err) {
     console.error(err);
     $('#app').innerHTML = `<div class="aviso">Erro ao abrir a tela: ${esc(err.message)}</div>`;
   }
   $$('.abas a').forEach((a) => a.classList.toggle('ativa', a.dataset.aba === aba));
-  window.scrollTo(0, 0);
+  window.scrollTo(0, manterRolagem ? rolagem : 0);
 }
 
+function carregarFotos() {
+  $$('img[data-foto]').forEach(async (img) => {
+    const id = img.dataset.foto;
+    img.dataset.foto = '';
+    try {
+      const src = await DB.foto(id);
+      if (!src) { img.alt = 'foto ainda não sincronizada'; return; }
+      img.src = src;
+      const a = document.createElement('a');
+      a.href = src; a.target = '_blank';
+      img.replaceWith(a); a.appendChild(img);
+    } catch { img.alt = 'foto indisponível sem internet'; }
+  });
+}
+
+// Dado novo chegou (de outro aparelho ou desta gravação): atualiza a tela se ela for só de leitura
+// e a pessoa não estiver digitando.
+let agendado = null;
+DB.aoMudar(() => {
+  clearTimeout(agendado);
+  agendado = setTimeout(() => {
+    const digitando = document.activeElement && document.activeElement.closest('#app form');
+    if (TELAS_AO_VIVO.has(telaAtual) && !digitando) render({ manterRolagem: true });
+  }, 250);
+});
+
+// ---------- Login ----------
+function mostrarNavegacao(sim) {
+  $('.abas').style.display = sim ? '' : 'none';
+  $('#usuario-topo').textContent = sim && sessao.perfil ? sessao.perfil.nome.split(' ')[0] : '';
+}
+
+function telaLogin(primeiroAcesso = false) {
+  mostrarNavegacao(false);
+  telaAtual = 'login';
+  $('#app').innerHTML = primeiroAcesso ? `
+    <h2>Primeiro acesso</h2>
+    <p class="suave">Crie a conta do administrador. Isso só funciona uma vez; depois, o administrador cria os outros usuários pelo app.</p>
+    <form id="form-login">
+      <label>Seu nome completo</label><input name="nome" required>
+      <label>Usuário</label><input name="usuario" required autocapitalize="none" placeholder="ex: josiel">
+      <label>Senha (mínimo 6)</label><input type="password" name="senha" required minlength="6" autocomplete="new-password">
+      <div class="acoes"><button>Criar administrador</button></div>
+      <p style="text-align:center"><a href="#" id="lnk-voltar">Voltar para o login</a></p>
+    </form>` : `
+    <h2>Entrar</h2>
+    <form id="form-login">
+      <label>Usuário</label><input name="usuario" required autocapitalize="none" autocomplete="username">
+      <label>Senha</label><input type="password" name="senha" required autocomplete="current-password">
+      <div class="acoes"><button>Entrar</button></div>
+      <p class="suave" style="text-align:center">Esqueceu a senha? Fale com o administrador.</p>
+      <p style="text-align:center"><a href="#" id="lnk-primeiro">Primeiro acesso (criar administrador)</a></p>
+    </form>`;
+  const f = $('#form-login');
+  const lp = $('#lnk-primeiro'), lv = $('#lnk-voltar');
+  if (lp) lp.onclick = (e) => { e.preventDefault(); telaLogin(true); };
+  if (lv) lv.onclick = (e) => { e.preventDefault(); telaLogin(false); };
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const b = $('button', f); b.disabled = true;
+    try {
+      if (primeiroAcesso) await sessao.criarPrimeiroAdmin(f.nome.value, f.usuario.value, f.senha.value);
+      else await sessao.entrar(f.usuario.value, f.senha.value);
+      // a troca de tela acontece em sessao.aoMudar
+    } catch (err) {
+      alert(err.message);
+      b.disabled = false;
+    }
+  });
+}
+
+function telaBloqueado(msg) {
+  mostrarNavegacao(false);
+  telaAtual = 'bloqueado';
+  $('#app').innerHTML = `<div class="aviso">${esc(msg)}</div><div class="acoes"><button id="btn-sair">Sair</button></div>`;
+  $('#btn-sair').onclick = () => sessao.sair();
+}
+
+function telaSemConfiguracao() {
+  mostrarNavegacao(false);
+  $('#app').innerHTML = `<div class="aviso">O app ainda não foi ligado ao banco de dados. Preencha <code>firebase-config.js</code> (veja o README).</div>`;
+}
+
+// ---------- Início ----------
 function statusRede() {
   const el = $('#status-rede');
   el.textContent = navigator.onLine ? 'online' : 'offline';
 }
 
-window.addEventListener('hashchange', render);
+window.addEventListener('hashchange', () => render());
 window.addEventListener('online', statusRede);
 window.addEventListener('offline', statusRede);
 statusRede();
-render();
+
+if (!firebaseConfig) {
+  telaSemConfiguracao();
+} else {
+  mostrarNavegacao(false);
+  $('#app').innerHTML = '<p class="vazio">Carregando…</p>';
+  sessao.aoMudar((p) => {
+    if (!p) return telaLogin(false);
+    if (p.bloqueado) return telaBloqueado(p.bloqueado);
+    mostrarNavegacao(true);
+    if (telaAtual === 'login' || telaAtual === 'bloqueado' || telaAtual === null) render();
+  });
+  iniciar(firebaseConfig);
+}
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {});
