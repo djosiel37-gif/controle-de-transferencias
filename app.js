@@ -776,7 +776,7 @@ telas.mais = async (_0, _1, ctx) => {
       <button class="sec" id="btn-backup">Baixar cópia</button>
       <label class="botao sec" style="margin:0">Importar backup<input type="file" id="inp-backup" accept=".json,application/json" hidden></label>
     </div>` : ''}
-    <p class="suave" style="text-align:center;margin-top:24px">Controle de Transferências · v5</p>`;
+    <p class="suave" style="text-align:center;margin-top:24px">Controle de Transferências · v6</p>`;
 };
 
 // --- Usuários (só administrador) ---
@@ -790,7 +790,7 @@ telas.usuarioNovo = async (_0, _1, ctx) => {
       if (!normalizarUsuario(f.usuario.value)) return alert('Informe um usuário válido.');
       const b = $('button', f); b.disabled = true; b.textContent = 'Criando…';
       try {
-        await sessao.criarUsuario({ nome: f.nome.value, usuario: f.usuario.value, senha: f.senha.value, papel: f.papel.value });
+        await sessao.criarUsuario({ nome: f.nome.value, usuario: f.usuario.value, senha: f.senha.value, papel: 'operador' });
         alert(`Usuário criado. Passe para a pessoa:\nUsuário: ${normalizarUsuario(f.usuario.value)}\nSenha: ${f.senha.value}`);
         location.hash = '#/mais';
       } catch (err) {
@@ -806,11 +806,7 @@ telas.usuarioNovo = async (_0, _1, ctx) => {
       <label>Usuário para entrar *</label><input name="usuario" required autocapitalize="none" placeholder="ex: joao.silva">
       <div class="suave">Vai ficar: <b id="usr-prev">—</b></div>
       <label>Senha inicial * (mínimo 6)</label><input name="senha" required minlength="6">
-      <label>Nível *</label>
-      <select name="papel">
-        <option value="operador">Operador: lança e recebe transferências e consertos</option>
-        <option value="admin">Administrador: tudo, inclusive cadastros, usuários e cancelamentos</option>
-      </select>
+      <p class="suave">Será criado como <b>Operador</b>: lança e recebe transferências e consertos. Administrador é só você.</p>
       <div class="acoes"><button>Criar usuário</button><a class="botao sec" href="#/mais">Cancelar</a></div>
     </form>`;
 };
@@ -824,7 +820,7 @@ telas.usuario = async (id, _1, ctx) => {
     $('#form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const f = e.target;
-      await DB.salvar('usuarios', { ...u, nome: f.nome.value.trim(), papel: souEu ? u.papel : f.papel.value, ativo: souEu ? true : f.ativo.value === 'sim' });
+      await DB.salvar('usuarios', { ...u, nome: f.nome.value.trim(), papel: u.papel, ativo: souEu ? true : f.ativo.value === 'sim' });
       location.hash = '#/mais';
     });
   });
@@ -834,16 +830,13 @@ telas.usuario = async (id, _1, ctx) => {
     <form id="form">
       <label>Nome</label><input name="nome" value="${esc(u.nome)}" required>
       <label>Nível</label>
-      <select name="papel" ${souEu ? 'disabled' : ''}>
-        <option value="operador" ${u.papel !== 'admin' ? 'selected' : ''}>Operador</option>
-        <option value="admin" ${u.papel === 'admin' ? 'selected' : ''}>Administrador</option>
-      </select>
+      <div class="cartao">${u.papel === 'admin' ? 'Administrador' : 'Operador'}</div>
       <label>Acesso</label>
       <select name="ativo" ${souEu ? 'disabled' : ''}>
         <option value="sim" ${u.ativo !== false ? 'selected' : ''}>Ativo</option>
         <option value="nao" ${u.ativo === false ? 'selected' : ''}>Desativado (não consegue mais entrar)</option>
       </select>
-      ${souEu ? '<p class="suave">Você não pode rebaixar nem desativar a própria conta.</p>' : ''}
+      ${souEu ? '<p class="suave">Você não pode desativar a própria conta.</p>' : ''}
       <div class="acoes"><button>Salvar</button><a class="botao sec" href="#/mais">Cancelar</a></div>
     </form>`;
 };
@@ -1072,11 +1065,13 @@ function telaLogin(primeiroAcesso = false) {
       <label>Senha</label><input type="password" name="senha" required autocomplete="current-password">
       <div class="acoes"><button>Entrar</button></div>
       <p class="suave" style="text-align:center">Esqueceu a senha? Fale com o administrador.</p>
-      <p style="text-align:center"><a href="#" id="lnk-primeiro">Primeiro acesso (criar administrador)</a></p>
+      <p style="text-align:center" id="p-primeiro" hidden><a href="#" id="lnk-primeiro">Primeiro acesso (criar administrador)</a></p>
     </form>`;
   const f = $('#form-login');
   const lp = $('#lnk-primeiro'), lv = $('#lnk-voltar');
   if (lp) lp.onclick = (e) => { e.preventDefault(); telaLogin(true); };
+  // "Primeiro acesso" só aparece enquanto não existe administrador.
+  if (lp) sessao.existeAdmin().then((existe) => { if (existe !== true && $('#p-primeiro')) $('#p-primeiro').hidden = false; });
   if (lv) lv.onclick = (e) => { e.preventDefault(); telaLogin(false); };
   f.addEventListener('submit', async (e) => {
     e.preventDefault();

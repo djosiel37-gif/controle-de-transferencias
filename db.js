@@ -127,6 +127,10 @@ export const sessao = {
   aoMudar: (fn) => ouvintes.sessao.add(fn),
   entrar: (usuario, senha) => comErro(() => signInWithEmailAndPassword(auth, emailDe(usuario), senha)),
   sair: () => signOut(auth),
+  // true / false, ou null se não deu para saber (sem internet).
+  existeAdmin: async () => {
+    try { return (await getDoc(doc(db, 'config', 'inicial'))).exists(); } catch { return null; }
+  },
 
   // Primeiro acesso: cria a conta do administrador. As regras do banco só permitem isso uma vez.
   async criarPrimeiroAdmin(nome, usuario, senha) {

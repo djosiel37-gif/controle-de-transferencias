@@ -23,7 +23,7 @@ Horímetro/odômetro, nível de combustível, pneus/esteiras, óleo do motor, ó
 
 Os dados ficam num banco online (Firebase, do Google) e numa cópia em cada aparelho. Assim todo mundo vê as mesmas máquinas e registros, e o app continua funcionando **sem internet**: o que for lançado offline sobe sozinho quando o sinal voltar.
 
-- **Administrador**: tudo, inclusive cadastrar fazendas e máquinas, criar e desativar usuários, editar o checklist, cancelar transferências e excluir consertos, importar backup.
+- **Administrador** (só um, criado no primeiro acesso): tudo, inclusive cadastrar fazendas e máquinas, criar e desativar usuários (só ele cria contas, e sempre como operador), editar o checklist, cancelar transferências e excluir consertos, importar backup.
 - **Operador**: lança transferências e consertos, registra chegada e retorno, vê tudo e exporta planilhas.
 - Login por **usuário e senha** (não precisa de e-mail). Cada registro guarda quem lançou.
 - Esqueceu a senha: o administrador desativa o usuário antigo e cria um novo. A própria pessoa pode trocar a senha em *Mais → Minha conta*.
