@@ -17,7 +17,7 @@ Funciona no celular, **sem internet** (os dados ficam salvos no próprio aparelh
 
 ### Checklist padrão
 
-Horímetro/odômetro, nível de combustível, pneus/esteiras, óleo do motor, óleo hidráulico, vazamentos, lataria/estrutura, luzes e sinalização, extintor, documentos e ferramentas, acessórios/implementos que acompanham. Sempre entram também: responsável, data/hora, observações e fotos.
+Horímetro/odômetro, nível de combustível, pneus/esteiras, óleo do motor, óleo hidráulico, baterias, vazamentos, lataria/estrutura, luzes e sinalização, extintor, documentos e ferramentas, acessórios/implementos que acompanham. Sempre entram também: responsável, data/hora, observações e fotos.
 
 ## Atenção: onde ficam os dados
 
