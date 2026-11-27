@@ -692,7 +692,7 @@ telas.mais = async (_0, _1, ctx) => {
       <button id="btn-backup">Baixar backup</button>
       <label class="botao sec" style="margin:0">Restaurar backup<input type="file" id="inp-backup" accept=".json,application/json" hidden></label>
     </div>
-    <p class="suave" style="text-align:center;margin-top:24px">Controle de Transferências · v1</p>`;
+    <p class="suave" style="text-align:center;margin-top:24px">Controle de Transferências · v3</p>`;
 };
 
 // ---------- Exportação ----------
@@ -831,6 +831,14 @@ statusRede();
 render();
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {});
+  // Quando uma versão nova do app assume, recarrega uma vez para mostrar a novidade.
+  let recarregou = false;
+  const tinhaControle = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!tinhaControle || recarregou) return;
+    recarregou = true;
+    location.reload();
+  });
 }
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
