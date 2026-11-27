@@ -2,7 +2,7 @@
 
 App para registrar a movimentação de máquinas e equipamentos entre fazendas e os envios para conserto na cidade, com checklist de saída e de chegada.
 
-Funciona no celular, **sem internet** (os dados ficam salvos no próprio aparelho). Pode ser instalado na tela inicial como um app.
+Funciona no celular, inclusive **sem internet**, e sincroniza os dados entre todos os usuários quando há sinal. Pode ser instalado na tela inicial como um app.
 
 ## O que faz
 
@@ -12,30 +12,38 @@ Funciona no celular, **sem internet** (os dados ficam salvos no próprio aparelh
 - **Histórico por máquina**: tudo o que a máquina passou e quanto já se gastou com conserto.
 - **Fotos** no checklist (tiradas pela câmera, comprimidas para não lotar o celular).
 - **Exportação para planilha** (CSV que abre no Excel/Google Planilhas): transferências, consertos e máquinas.
-- **Backup e restauração** em arquivo.
+- **Login com níveis** (administrador e operador) e **dados compartilhados** entre os aparelhos.
 - **Checklist editável** em *Mais → Itens do checklist*.
 
 ### Checklist padrão
 
 Horímetro/odômetro, nível de combustível, pneus/esteiras, óleo do motor, óleo hidráulico, baterias, vazamentos, lataria/estrutura, luzes e sinalização, extintor, documentos e ferramentas, acessórios/implementos que acompanham. Sempre entram também: responsável, data/hora, observações e fotos.
 
-## Atenção: onde ficam os dados
+## Login e dados compartilhados
 
-Nesta versão os dados ficam **somente no aparelho** onde foram lançados. Isso quer dizer:
+Os dados ficam num banco online (Firebase, do Google) e numa cópia em cada aparelho. Assim todo mundo vê as mesmas máquinas e registros, e o app continua funcionando **sem internet**: o que for lançado offline sobe sozinho quando o sinal voltar.
 
-- Cada celular tem os seus registros; um não vê o do outro.
-- Se limpar os dados do navegador ou perder o celular, perde os registros. **Faça backup com frequência** (Mais → Baixar backup) e guarde o arquivo no Drive ou WhatsApp.
+- **Administrador**: tudo, inclusive cadastrar fazendas e máquinas, criar e desativar usuários, editar o checklist, cancelar transferências e excluir consertos, importar backup.
+- **Operador**: lança transferências e consertos, registra chegada e retorno, vê tudo e exporta planilhas.
+- Login por **usuário e senha** (não precisa de e-mail). Cada registro guarda quem lançou.
+- Esqueceu a senha: o administrador desativa o usuário antigo e cria um novo. A própria pessoa pode trocar a senha em *Mais → Minha conta*.
+- O primeiro login e a criação de usuários precisam de internet. Depois de entrar uma vez, o app abre offline.
 
-Se mais de uma pessoa precisar lançar e ver os mesmos dados, o próximo passo é ligar o app a um banco de dados online.
+### Configurar o Firebase (uma vez)
 
-## Como colocar no ar (GitHub Pages)
+1. Em https://console.firebase.google.com, crie um projeto.
+2. Em *Visão geral do projeto*, adicione um app **Web** (ícone `</>`) e copie o objeto `firebaseConfig` para `firebase-config.js`.
+3. *Authentication → Começar →* ative **E-mail/senha**.
+4. *Firestore Database → Criar banco* (local `southamerica-east1`, modo produção).
+5. *Firestore Database → Regras*: cole o conteúdo de `firestore.rules` e clique em **Publicar**.
+6. Abra o app, toque em **Primeiro acesso** e crie o administrador. Isso só funciona uma vez.
+7. Em *Mais → Usuários*, crie os operadores.
 
-1. No repositório, vá em **Settings → Pages**.
-2. Em *Source*, escolha **Deploy from a branch**, branch `main`, pasta `/ (root)`, e salve.
-3. Em 1 ou 2 minutos aparece o link (algo como `https://djosiel37-gif.github.io/controle-de-transferencias/`).
-4. Abra o link no celular e use **Adicionar à tela inicial**. Depois de aberto uma vez com internet, funciona offline.
+Dados da versão antiga (que ficavam só no celular): entre como administrador **no mesmo aparelho** e, em *Mais*, toque em **Enviar para o servidor** no aviso amarelo. Se tiver um arquivo de backup antigo, use *Mais → Importar backup*.
 
-> GitHub Pages em repositório **privado** só funciona em conta paga. Em conta gratuita, o repositório precisa ser público (os dados lançados **não** vão para o GitHub, ficam no celular; o que fica público é só o código do app).
+### Limites do plano gratuito do Firebase
+
+Para o tamanho de uma operação de fazendas, o plano gratuito (Spark) deve bastar: 1 GB de armazenamento, 50 mil leituras e 20 mil gravações por dia. As fotos são o que mais ocupa (cerca de 100 KB cada, comprimidas), então 1 GB dá para algo na casa de 10 mil fotos. Acompanhe em *Firestore → Uso*.
 
 ## Rodar no computador
 
@@ -47,13 +55,18 @@ python3 -m http.server 8000
 
 e abra `http://localhost:8000`.
 
+Para testar sem mexer no banco real, use o Firebase Emulator (`firebase emulators:start --only auth,firestore`) e abra `http://localhost:8000/?emulador`.
+
 ## Estrutura
 
 | Arquivo | O que é |
 |---|---|
 | `index.html` | Página principal |
 | `app.js` | Telas e regras do app |
-| `db.js` | Gravação local (IndexedDB) |
+| `db.js` | Login e dados (Firebase Auth + Firestore com cópia offline) |
+| `firebase-config.js` | Identificação do projeto Firebase |
+| `firestore.rules` | Regras de acesso do banco (quem pode ler e gravar o quê) |
+| `vendor/firebase/` | SDK do Firebase 10.14.1, copiado para abrir sem internet |
 | `styles.css` | Visual |
 | `sw.js` | Service worker (funcionamento offline). Ao alterar arquivos, aumente a `VERSAO` |
 | `manifest.webmanifest`, `icon.svg` | Instalação como app |
