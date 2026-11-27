@@ -1,0 +1,835 @@
+/* Controle de Transferências — app principal (sem dependências externas). */
+
+// ---------- Utilidades ----------
+const $ = (sel, raiz = document) => raiz.querySelector(sel);
+const $$ = (sel, raiz = document) => [...raiz.querySelectorAll(sel)];
+const esc = (v) =>
+  String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const hojeISO = () => {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 16);
+};
+const dataBR = (iso) => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d)) return esc(iso);
+  const temHora = String(iso).length > 10;
+  return d.toLocaleDateString('pt-BR', temHora ? {} : { timeZone: 'UTC' }) +
+    (temHora ? ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '');
+};
+const reais = (v) =>
+  v === '' || v == null || isNaN(Number(v)) ? '—' : Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const num = (v) => (v === '' || v == null ? '' : Number(String(v).replace(',', '.')));
+
+// ---------- Checklist padrão (editável em "Mais") ----------
+const CHECKLIST_PADRAO = [
+  { id: 'horimetro', rotulo: 'Horímetro / odômetro', tipo: 'numero' },
+  { id: 'combustivel', rotulo: 'Nível de combustível', tipo: 'nivel' },
+  { id: 'pneus', rotulo: 'Pneus / esteiras', tipo: 'ok' },
+  { id: 'oleo_motor', rotulo: 'Nível de óleo do motor', tipo: 'ok' },
+  { id: 'oleo_hidraulico', rotulo: 'Óleo hidráulico', tipo: 'ok' },
+  { id: 'vazamentos', rotulo: 'Sem vazamentos', tipo: 'ok' },
+  { id: 'avarias', rotulo: 'Lataria / estrutura sem avarias', tipo: 'ok' },
+  { id: 'luzes', rotulo: 'Luzes e sinalização', tipo: 'ok' },
+  { id: 'extintor', rotulo: 'Extintor', tipo: 'ok' },
+  { id: 'documentos', rotulo: 'Documentos e ferramentas', tipo: 'ok' },
+  { id: 'acessorios', rotulo: 'Acessórios / implementos que acompanham', tipo: 'texto' }
+];
+const NIVEIS = ['Reserva', '1/4', '1/2', '3/4', 'Cheio'];
+const STATUS_MAQ = {
+  disponivel: ['Na fazenda', 'e-ok'],
+  transito: ['Em trânsito', 'e-transito'],
+  conserto: ['Em conserto', 'e-conserto']
+};
+
+async function checklistModelo() {
+  const c = await DB.obter('config', 'checklist');
+  return c ? c.itens : CHECKLIST_PADRAO;
+}
+
+// ---------- Cache simples por renderização ----------
+async function carregarTudo() {
+  const [fazendas, maquinas, transferencias, consertos] = await Promise.all(
+    ['fazendas', 'maquinas', 'transferencias', 'consertos'].map((l) => DB.todos(l))
+  );
+  const fz = Object.fromEntries(fazendas.map((f) => [f.id, f]));
+  const mq = Object.fromEntries(maquinas.map((m) => [m.id, m]));
+  return { fazendas, maquinas, transferencias, consertos, fz, mq };
+}
+const nomeFazenda = (d, id) => (d.fz[id] ? d.fz[id].nome : '—');
+const nomeMaquina = (d, id) => (d.mq[id] ? `${d.mq[id].codigo ? d.mq[id].codigo + ' · ' : ''}${d.mq[id].nome}` : '(máquina removida)');
+const porData = (campo) => (a, b) => String(b[campo] || '').localeCompare(String(a[campo] || ''));
+
+// ---------- Fotos (comprimidas para caber no aparelho) ----------
+function comprimirFoto(arquivo, max = 1280, qualidade = 0.65) {
+  return new Promise((ok, erro) => {
+    const img = new Image();
+    const url = URL.createObjectURL(arquivo);
+    img.onload = () => {
+      const escala = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * escala);
+      c.height = Math.round(img.height * escala);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      ok(c.toDataURL('image/jpeg', qualidade));
+    };
+    img.onerror = erro;
+    img.src = url;
+  });
+}
+
+// ---------- Componente: formulário de checklist ----------
+function htmlChecklist(itens, prefixo, anterior) {
+  return itens.map((it) => {
+    const nome = `${prefixo}_${it.id}`;
+    const ref = anterior && anterior.respostas && anterior.respostas[it.id];
+    const dica = ref ? `<div class="suave">Na saída: ${esc(textoResposta(it, ref))}</div>` : '';
+    let campo;
+    if (it.tipo === 'numero') {
+      campo = `<input name="${nome}" inputmode="decimal" placeholder="Ex: 1520,5">`;
+    } else if (it.tipo === 'nivel') {
+      campo = `<select name="${nome}"><option value="">Selecione</option>${NIVEIS.map((n) => `<option>${n}</option>`).join('')}</select>`;
+    } else if (it.tipo === 'texto') {
+      campo = `<input name="${nome}" placeholder="Descreva">`;
+    } else {
+      campo = `<div class="opcoes">
+        <label><input type="radio" name="${nome}" value="ok"> OK</label>
+        <label><input type="radio" name="${nome}" value="problema"> Problema</label>
+        <label><input type="radio" name="${nome}" value="na"> N/A</label>
+      </div>
+      <input name="${nome}_obs" placeholder="Observação (se tiver problema)" style="margin-top:6px">`;
+    }
+    return `<div class="check-item"><div class="titulo">${esc(it.rotulo)}</div>${dica}${campo}</div>`;
+  }).join('');
+}
+
+function htmlBlocoChecklist(itens, prefixo, rotuloResp, anterior) {
+  return `
+    <h3>Checklist</h3>
+    <div class="cartao">${htmlChecklist(itens, prefixo, anterior)}</div>
+    <label>${rotuloResp} *</label>
+    <input name="${prefixo}_responsavel" required>
+    <label>Observações gerais</label>
+    <textarea name="${prefixo}_obs"></textarea>
+    <label>Fotos</label>
+    <input type="file" accept="image/*" capture="environment" multiple data-fotos="${prefixo}">
+    <div class="fotos" id="fotos_${prefixo}"></div>`;
+}
+
+const fotosPendentes = {};
+function ligarFotos(form) {
+  $$('[data-fotos]', form).forEach((inp) => {
+    const p = inp.dataset.fotos;
+    fotosPendentes[p] = [];
+    inp.addEventListener('change', async () => {
+      for (const f of inp.files) {
+        try { fotosPendentes[p].push(await comprimirFoto(f)); } catch { alert('Não foi possível ler uma das fotos.'); }
+      }
+      inp.value = '';
+      $(`#fotos_${p}`).innerHTML = fotosPendentes[p].map((src) => `<img src="${src}" alt="foto">`).join('');
+    });
+  });
+}
+
+function lerChecklist(form, itens, prefixo) {
+  const fd = new FormData(form);
+  const respostas = {};
+  for (const it of itens) {
+    const v = fd.get(`${prefixo}_${it.id}`);
+    if (it.tipo === 'ok') respostas[it.id] = { valor: v || '', obs: fd.get(`${prefixo}_${it.id}_obs`) || '' };
+    else respostas[it.id] = { valor: it.tipo === 'numero' ? num(v) : (v || '') };
+  }
+  return {
+    itens: itens.map((i) => ({ ...i })), // guarda o modelo usado, caso ele mude depois
+    respostas,
+    responsavel: fd.get(`${prefixo}_responsavel`) || '',
+    obs: fd.get(`${prefixo}_obs`) || '',
+    fotos: fotosPendentes[prefixo] || [],
+    data: fd.get(`${prefixo}_data`) || hojeISO()
+  };
+}
+
+function textoResposta(it, r) {
+  if (!r) return '—';
+  if (it.tipo === 'ok') {
+    const v = { ok: 'OK', problema: 'Problema', na: 'N/A' }[r.valor] || '—';
+    return r.obs ? `${v} (${r.obs})` : v;
+  }
+  return r.valor === '' || r.valor == null ? '—' : String(r.valor);
+}
+
+function divergencias(saida, chegada) {
+  if (!saida || !chegada) return [];
+  const lista = [];
+  for (const it of chegada.itens) {
+    const a = saida.respostas[it.id], b = chegada.respostas[it.id];
+    if (!a || !b) continue;
+    if (it.tipo === 'ok' && a.valor === 'ok' && b.valor === 'problema') lista.push(`${it.rotulo}: estava OK na saída, chegou com problema${b.obs ? ' (' + b.obs + ')' : ''}`);
+    if (it.tipo === 'nivel' && a.valor && b.valor && NIVEIS.indexOf(b.valor) < NIVEIS.indexOf(a.valor)) lista.push(`${it.rotulo}: saiu ${a.valor}, chegou ${b.valor}`);
+    if (it.tipo === 'numero' && a.valor !== '' && b.valor !== '' && Number(b.valor) < Number(a.valor)) lista.push(`${it.rotulo}: valor na chegada (${b.valor}) menor que na saída (${a.valor})`);
+    if (it.tipo === 'texto' && a.valor && b.valor && a.valor.trim().toLowerCase() !== b.valor.trim().toLowerCase()) lista.push(`${it.rotulo}: saída "${a.valor}" / chegada "${b.valor}"`);
+  }
+  return lista;
+}
+
+function htmlChecklistLeitura(ck, titulo, outro) {
+  if (!ck) return '';
+  const div = outro ? divergencias(outro, ck) : [];
+  return `
+    <h3>${esc(titulo)}</h3>
+    ${div.length ? `<div class="aviso"><b>Divergências em relação à saída:</b><br>${div.map(esc).join('<br>')}</div>` : ''}
+    <div class="cartao">
+      <div class="linha"><span class="suave">${dataBR(ck.data)}</span><span>Resp.: <b>${esc(ck.responsavel)}</b></span></div>
+      <table class="tabela-check">${ck.itens.map((it) => {
+        const r = ck.respostas[it.id];
+        const ruim = it.tipo === 'ok' && r && r.valor === 'problema';
+        return `<tr><td>${esc(it.rotulo)}</td><td style="text-align:right${ruim ? ';color:var(--erro);font-weight:700' : ''}">${esc(textoResposta(it, r))}</td></tr>`;
+      }).join('')}</table>
+      ${ck.obs ? `<p><b>Obs.:</b> ${esc(ck.obs)}</p>` : ''}
+      ${ck.fotos && ck.fotos.length ? `<div class="fotos">${ck.fotos.map((s) => `<a href="${s}" target="_blank"><img src="${s}" alt="foto"></a>`).join('')}</div>` : ''}
+    </div>`;
+}
+
+function etiquetaMaquina(m) {
+  const [t, c] = STATUS_MAQ[m.status || 'disponivel'];
+  return `<span class="etiqueta ${c}">${t}</span>`;
+}
+const optFazendas = (d, sel, excluir) =>
+  d.fazendas.filter((f) => f.id !== excluir).sort((a, b) => a.nome.localeCompare(b.nome))
+    .map((f) => `<option value="${f.id}" ${f.id === sel ? 'selected' : ''}>${esc(f.nome)}</option>`).join('');
+
+// ---------- Telas ----------
+const telas = {};
+
+telas.inicio = async (_0, _1, ctx) => {
+  const d = await carregarTudo();
+  const transito = d.transferencias.filter((t) => t.status === 'transito').sort(porData('dataSaida'));
+  const oficina = d.consertos.filter((c) => c.status === 'oficina').sort(porData('dataEnvio'));
+  const hoje = new Date().toISOString().slice(0, 10);
+  const semCadastro = !d.fazendas.length
+    ? `<div class="aviso">Comece cadastrando as fazendas em <a href="#/mais">Mais → Fazendas</a> e depois as máquinas.</div>` : '';
+  return `
+    ${semCadastro}
+    <div class="resumo">
+      <a class="cartao" href="#/maquinas"><b>${d.maquinas.length}</b><span class="suave">máquinas</span></a>
+      <a class="cartao" href="#/transferencias"><b>${transito.length}</b><span class="suave">em trânsito</span></a>
+      <a class="cartao" href="#/consertos"><b>${oficina.length}</b><span class="suave">em conserto</span></a>
+    </div>
+    <div class="acoes">
+      <a class="botao" href="#/transferencias/nova">Nova transferência</a>
+      <a class="botao sec" href="#/consertos/novo">Enviar p/ conserto</a>
+    </div>
+    <h3>Aguardando recebimento</h3>
+    ${transito.length ? transito.map((t) => `
+      <a class="cartao" href="#/transferencias/${t.id}">
+        <div class="linha"><b>${esc(nomeMaquina(d, t.maquinaId))}</b><span class="etiqueta e-transito">Em trânsito</span></div>
+        <div class="suave">${esc(nomeFazenda(d, t.origemId))} → ${esc(nomeFazenda(d, t.destinoId))} · saiu ${dataBR(t.dataSaida)}</div>
+      </a>`).join('') : '<p class="vazio">Nada em trânsito.</p>'}
+    <h3>Na oficina</h3>
+    ${oficina.length ? oficina.map((c) => {
+      const atrasado = c.prazo && c.prazo < hoje;
+      return `<a class="cartao" href="#/consertos/${c.id}">
+        <div class="linha"><b>${esc(nomeMaquina(d, c.maquinaId))}</b>
+          <span class="etiqueta ${atrasado ? 'e-erro' : 'e-conserto'}">${atrasado ? 'Prazo vencido' : 'Na oficina'}</span></div>
+        <div class="suave">${esc(c.oficina)} · prazo ${dataBR(c.prazo)}</div>
+      </a>`;
+    }).join('') : '<p class="vazio">Nenhuma máquina na oficina.</p>'}`;
+};
+
+// --- Máquinas ---
+telas.maquinas = async (_0, _1, ctx) => {
+  const d = await carregarTudo();
+  const lista = d.maquinas.sort((a, b) => (a.codigo || a.nome).localeCompare(b.codigo || b.nome));
+  ctx.depois(() => {
+    const b = $('#busca');
+    if (b) b.addEventListener('input', () => {
+      const q = b.value.toLowerCase();
+      $$('[data-busca]').forEach((el) => (el.style.display = el.dataset.busca.includes(q) ? '' : 'none'));
+    });
+  });
+  return `
+    <div class="linha"><h2>Máquinas e equipamentos</h2><a class="botao" href="#/maquinas/nova">+ Nova</a></div>
+    <input id="busca" class="busca" placeholder="Buscar por código, nome, fazenda…">
+    ${lista.length ? lista.map((m) => `
+      <a class="cartao" href="#/maquinas/${m.id}" data-busca="${esc([m.codigo, m.nome, m.tipo, m.marca, nomeFazenda(d, m.fazendaId)].join(' ').toLowerCase())}">
+        <div class="linha"><b>${esc(nomeMaquina(d, m.id))}</b>${etiquetaMaquina(m)}</div>
+        <div class="suave">${esc(m.tipo || '')}${m.marca ? ' · ' + esc(m.marca) : ''} · ${m.status === 'conserto' ? 'Oficina' : esc(nomeFazenda(d, m.fazendaId))}</div>
+      </a>`).join('') : '<p class="vazio">Nenhuma máquina cadastrada.</p>'}`;
+};
+
+telas.maquinaForm = async (id, _1, ctx) => {
+  const d = await carregarTudo();
+  const m = id ? d.mq[id] : { status: 'disponivel' };
+  if (!m) return '<p>Máquina não encontrada.</p>';
+  if (!d.fazendas.length) return `<div class="aviso">Cadastre pelo menos uma fazenda antes. <a href="#/fazendas/nova">Cadastrar fazenda</a></div>`;
+  ctx.depois(() => {
+    $('#form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const obj = { ...m, ...Object.fromEntries(fd) };
+      obj.status = obj.status || 'disponivel';
+      await DB.salvar('maquinas', obj);
+      location.hash = `#/maquinas/${obj.id}`;
+    });
+  });
+  return `
+    <h2>${id ? 'Editar máquina' : 'Nova máquina'}</h2>
+    <form id="form">
+      <div class="duas">
+        <div><label>Código / frota</label><input name="codigo" value="${esc(m.codigo)}" placeholder="Ex: TR-04"></div>
+        <div><label>Tipo</label><input name="tipo" value="${esc(m.tipo)}" list="tipos" placeholder="Trator, grade, pulverizador…"></div>
+      </div>
+      <datalist id="tipos">${['Trator', 'Colheitadeira', 'Pulverizador', 'Plantadeira', 'Grade', 'Roçadeira', 'Caminhão', 'Carreta', 'Pá carregadeira', 'Escavadeira', 'Motoniveladora', 'Gerador', 'Motobomba', 'Implemento'].map((t) => `<option>${t}</option>`).join('')}</datalist>
+      <label>Nome / descrição *</label><input name="nome" required value="${esc(m.nome)}" placeholder="Ex: Trator John Deere 6110J">
+      <div class="duas">
+        <div><label>Marca / modelo</label><input name="marca" value="${esc(m.marca)}"></div>
+        <div><label>Placa / nº de série / chassi</label><input name="serie" value="${esc(m.serie)}"></div>
+      </div>
+      <label>Fazenda onde está *</label>
+      <select name="fazendaId" required ${id ? 'disabled' : ''}>${optFazendas(d, m.fazendaId)}</select>
+      ${id ? '<div class="suave">A localização muda pelas transferências.</div>' : ''}
+      <label>Observações</label><textarea name="obs">${esc(m.obs)}</textarea>
+      <div class="acoes"><button>Salvar</button><a class="botao sec" href="#/maquinas">Cancelar</a></div>
+    </form>`;
+};
+
+telas.maquina = async (id, _1, ctx) => {
+  const d = await carregarTudo();
+  const m = d.mq[id];
+  if (!m) return '<p>Máquina não encontrada.</p>';
+  const eventos = [
+    ...d.transferencias.filter((t) => t.maquinaId === id).map((t) => ({ data: t.dataSaida, html: `
+      <a class="cartao" href="#/transferencias/${t.id}">
+        <div class="linha"><b>Transferência</b><span class="etiqueta ${t.status === 'transito' ? 'e-transito' : 'e-ok'}">${t.status === 'transito' ? 'Em trânsito' : 'Recebida'}</span></div>
+        <div class="suave">${esc(nomeFazenda(d, t.origemId))} → ${esc(nomeFazenda(d, t.destinoId))}</div>
+        <div class="suave">Saída ${dataBR(t.dataSaida)}${t.chegada ? ' · chegada ' + dataBR(t.chegada.data) : ''}</div>
+      </a>` })),
+    ...d.consertos.filter((c) => c.maquinaId === id).map((c) => ({ data: c.dataEnvio, html: `
+      <a class="cartao" href="#/consertos/${c.id}">
+        <div class="linha"><b>Conserto · ${esc(c.oficina)}</b><span class="etiqueta ${c.status === 'oficina' ? 'e-conserto' : 'e-ok'}">${c.status === 'oficina' ? 'Na oficina' : 'Retornou'}</span></div>
+        <div class="suave">${esc(c.defeito)}</div>
+        <div class="suave">Envio ${dataBR(c.dataEnvio)}${c.retorno ? ' · retorno ' + dataBR(c.retorno.data) : ''} · custo ${reais(c.custoFinal)}</div>
+      </a>` }))
+  ].sort(porData('data'));
+  const custoTotal = d.consertos.filter((c) => c.maquinaId === id).reduce((s, c) => s + (Number(c.custoFinal) || 0), 0);
+  const livre = (m.status || 'disponivel') === 'disponivel';
+  return `
+    <div class="linha"><h2>${esc(nomeMaquina(d, id))}</h2>${etiquetaMaquina(m)}</div>
+    <div class="cartao">
+      <div>${esc(m.tipo || '')}${m.marca ? ' · ' + esc(m.marca) : ''}</div>
+      ${m.serie ? `<div class="suave">Série/placa: ${esc(m.serie)}</div>` : ''}
+      <div>Local: <b>${m.status === 'conserto' ? 'Oficina' : m.status === 'transito' ? 'Em trânsito' : esc(nomeFazenda(d, m.fazendaId))}</b></div>
+      <div class="suave">Gasto total com consertos: ${reais(custoTotal)}</div>
+      ${m.obs ? `<p>${esc(m.obs)}</p>` : ''}
+    </div>
+    <div class="acoes">
+      ${livre ? `<a class="botao" href="#/transferencias/nova?maquina=${id}">Transferir</a>
+      <a class="botao sec" href="#/consertos/novo?maquina=${id}">Enviar p/ conserto</a>` : '<span class="suave">Ações liberadas quando a máquina estiver de volta a uma fazenda.</span>'}
+    </div>
+    <div class="acoes"><a class="botao sec" href="#/maquinas/${id}/editar">Editar cadastro</a></div>
+    <h3>Histórico</h3>
+    ${eventos.length ? `<div class="tl">${eventos.map((e) => e.html).join('')}</div>` : '<p class="vazio">Sem movimentações ainda.</p>'}`;
+};
+
+// --- Transferências ---
+telas.transferencias = async (_0, _1, ctx) => {
+  const d = await carregarTudo();
+  const lista = d.transferencias.sort(porData('dataSaida'));
+  return `
+    <div class="linha"><h2>Transferências</h2><a class="botao" href="#/transferencias/nova">+ Nova</a></div>
+    ${lista.length ? lista.map((t) => `
+      <a class="cartao" href="#/transferencias/${t.id}">
+        <div class="linha"><b>${esc(nomeMaquina(d, t.maquinaId))}</b><span class="etiqueta ${t.status === 'transito' ? 'e-transito' : 'e-ok'}">${t.status === 'transito' ? 'Em trânsito' : 'Recebida'}</span></div>
+        <div class="suave">${esc(nomeFazenda(d, t.origemId))} → ${esc(nomeFazenda(d, t.destinoId))} · ${dataBR(t.dataSaida)}</div>
+      </a>`).join('') : '<p class="vazio">Nenhuma transferência registrada.</p>'}`;
+};
+
+telas.transferenciaNova = async (_, params, ctx) => {
+  const d = await carregarTudo();
+  const itens = await checklistModelo();
+  const livres = d.maquinas.filter((m) => (m.status || 'disponivel') === 'disponivel');
+  if (d.fazendas.length < 2) return `<div class="aviso">Cadastre pelo menos duas fazendas para registrar uma transferência. <a href="#/fazendas/nova">Cadastrar fazenda</a></div>`;
+  if (!livres.length) return `<div class="aviso">Nenhuma máquina disponível em fazenda. <a href="#/maquinas/nova">Cadastrar máquina</a></div>`;
+  const sel = params.get('maquina');
+  ctx.depois(() => {
+    const form = $('#form');
+    ligarFotos(form);
+    const origem = () => (d.mq[form.maquinaId.value] || {}).fazendaId;
+    const atualizar = () => {
+      $('#origem').textContent = nomeFazenda(d, origem());
+      form.destinoId.innerHTML = '<option value="">Selecione</option>' + optFazendas(d, null, origem());
+    };
+    form.maquinaId.addEventListener('change', atualizar);
+    atualizar();
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const m = d.mq[form.maquinaId.value];
+      const t = {
+        maquinaId: m.id,
+        origemId: m.fazendaId,
+        destinoId: form.destinoId.value,
+        transporte: form.transporte.value,
+        motorista: form.motorista.value,
+        dataSaida: form.saida_data.value,
+        saida: lerChecklist(form, itens, 'saida'),
+        status: 'transito'
+      };
+      await DB.salvar('transferencias', t);
+      await DB.salvar('maquinas', { ...m, status: 'transito' });
+      location.hash = `#/transferencias/${t.id}`;
+    });
+  });
+  return `
+    <h2>Nova transferência</h2>
+    <form id="form">
+      <label>Máquina / equipamento *</label>
+      <select name="maquinaId" required>${livres.map((m) => `<option value="${m.id}" ${m.id === sel ? 'selected' : ''}>${esc(nomeMaquina(d, m.id))}</option>`).join('')}</select>
+      <label>Origem</label><div class="cartao" id="origem"></div>
+      <label>Destino *</label><select name="destinoId" required></select>
+      <div class="duas">
+        <div><label>Data e hora de saída *</label><input type="datetime-local" name="saida_data" required value="${hojeISO()}"></div>
+        <div><label>Transporte</label><input name="transporte" placeholder="Prancha, rodando, caminhão…"></div>
+      </div>
+      <label>Motorista / operador</label><input name="motorista">
+      ${htmlBlocoChecklist(itens, 'saida', 'Responsável pela saída')}
+      <div class="acoes"><button>Registrar saída</button><a class="botao sec" href="#/transferencias">Cancelar</a></div>
+    </form>`;
+};
+
+telas.transferencia = async (id, _1, ctx) => {
+  const d = await carregarTudo();
+  const t = d.transferencias.find((x) => x.id === id);
+  if (!t) return '<p>Transferência não encontrada.</p>';
+  return `
+    <div class="linha"><h2>Transferência</h2><span class="etiqueta ${t.status === 'transito' ? 'e-transito' : 'e-ok'}">${t.status === 'transito' ? 'Em trânsito' : 'Recebida'}</span></div>
+    <div class="cartao">
+      <div><a href="#/maquinas/${t.maquinaId}"><b>${esc(nomeMaquina(d, t.maquinaId))}</b></a></div>
+      <div>${esc(nomeFazenda(d, t.origemId))} → <b>${esc(nomeFazenda(d, t.destinoId))}</b></div>
+      ${t.transporte ? `<div class="suave">Transporte: ${esc(t.transporte)}</div>` : ''}
+      ${t.motorista ? `<div class="suave">Motorista/operador: ${esc(t.motorista)}</div>` : ''}
+    </div>
+    ${t.status === 'transito' ? `<div class="acoes"><a class="botao" href="#/transferencias/${id}/chegada">Registrar chegada</a></div>` : ''}
+    ${htmlChecklistLeitura(t.saida, 'Checklist de saída')}
+    ${htmlChecklistLeitura(t.chegada, 'Checklist de chegada', t.saida)}
+    <div class="acoes"><button class="sec" onclick="window.print()">Imprimir / PDF</button></div>`;
+};
+
+telas.transferenciaChegada = async (id, _1, ctx) => {
+  const d = await carregarTudo();
+  const t = d.transferencias.find((x) => x.id === id);
+  if (!t || t.status !== 'transito') return '<p>Essa transferência não está em trânsito.</p>';
+  const itens = t.saida.itens;
+  ctx.depois(() => {
+    const form = $('#form');
+    ligarFotos(form);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      t.chegada = lerChecklist(form, itens, 'chegada');
+      t.status = 'recebida';
+      await DB.salvar('transferencias', t);
+      const m = d.mq[t.maquinaId];
+      if (m) await DB.salvar('maquinas', { ...m, status: 'disponivel', fazendaId: t.destinoId });
+      location.hash = `#/transferencias/${t.id}`;
+    });
+  });
+  return `
+    <h2>Chegada em ${esc(nomeFazenda(d, t.destinoId))}</h2>
+    <div class="cartao"><b>${esc(nomeMaquina(d, t.maquinaId))}</b><div class="suave">Saiu de ${esc(nomeFazenda(d, t.origemId))} em ${dataBR(t.dataSaida)}</div></div>
+    <form id="form">
+      <label>Data e hora de chegada *</label><input type="datetime-local" name="chegada_data" required value="${hojeISO()}">
+      ${htmlBlocoChecklist(itens, 'chegada', 'Responsável pelo recebimento', t.saida)}
+      <div class="acoes"><button>Confirmar recebimento</button><a class="botao sec" href="#/transferencias/${id}">Cancelar</a></div>
+    </form>`;
+};
+
+// --- Consertos ---
+telas.consertos = async (_0, _1, ctx) => {
+  const d = await carregarTudo();
+  const lista = d.consertos.sort(porData('dataEnvio'));
+  const hoje = new Date().toISOString().slice(0, 10);
+  return `
+    <div class="linha"><h2>Consertos na cidade</h2><a class="botao" href="#/consertos/novo">+ Enviar</a></div>
+    ${lista.length ? lista.map((c) => {
+      const atrasado = c.status === 'oficina' && c.prazo && c.prazo < hoje;
+      const [txt, cls] = c.status === 'oficina' ? (atrasado ? ['Prazo vencido', 'e-erro'] : ['Na oficina', 'e-conserto']) : ['Retornou', 'e-ok'];
+      return `<a class="cartao" href="#/consertos/${c.id}">
+        <div class="linha"><b>${esc(nomeMaquina(d, c.maquinaId))}</b><span class="etiqueta ${cls}">${txt}</span></div>
+        <div class="suave">${esc(c.oficina)}${c.cidade ? ' (' + esc(c.cidade) + ')' : ''} · ${esc(c.defeito)}</div>
+        <div class="suave">Envio ${dataBR(c.dataEnvio)} · ${c.status === 'oficina' ? 'prazo ' + dataBR(c.prazo) : 'custo ' + reais(c.custoFinal)}</div>
+      </a>`;
+    }).join('') : '<p class="vazio">Nenhum conserto registrado.</p>'}`;
+};
+
+telas.consertoNovo = async (_, params, ctx) => {
+  const d = await carregarTudo();
+  const itens = await checklistModelo();
+  const livres = d.maquinas.filter((m) => (m.status || 'disponivel') === 'disponivel');
+  if (!livres.length) return `<div class="aviso">Nenhuma máquina disponível em fazenda. <a href="#/maquinas/nova">Cadastrar máquina</a></div>`;
+  const sel = params.get('maquina');
+  ctx.depois(() => {
+    const form = $('#form');
+    ligarFotos(form);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(form);
+      const m = d.mq[fd.get('maquinaId')];
+      const c = {
+        maquinaId: m.id,
+        origemId: m.fazendaId,
+        oficina: fd.get('oficina'),
+        cidade: fd.get('cidade'),
+        contato: fd.get('contato'),
+        defeito: fd.get('defeito'),
+        dataEnvio: fd.get('saida_data'),
+        orcamento: num(fd.get('orcamento')),
+        prazo: fd.get('prazo'),
+        saida: lerChecklist(form, itens, 'saida'),
+        status: 'oficina'
+      };
+      await DB.salvar('consertos', c);
+      await DB.salvar('maquinas', { ...m, status: 'conserto' });
+      location.hash = `#/consertos/${c.id}`;
+    });
+  });
+  return `
+    <h2>Enviar para conserto</h2>
+    <form id="form">
+      <label>Máquina / equipamento *</label>
+      <select name="maquinaId" required>${livres.map((m) => `<option value="${m.id}" ${m.id === sel ? 'selected' : ''}>${esc(nomeMaquina(d, m.id))} — ${esc(nomeFazenda(d, m.fazendaId))}</option>`).join('')}</select>
+      <div class="duas">
+        <div><label>Oficina *</label><input name="oficina" required></div>
+        <div><label>Cidade</label><input name="cidade" value="Tailândia"></div>
+      </div>
+      <label>Contato da oficina</label><input name="contato" placeholder="Nome / telefone">
+      <label>Defeito / serviço *</label><textarea name="defeito" required></textarea>
+      <div class="duas">
+        <div><label>Data de envio *</label><input type="datetime-local" name="saida_data" required value="${hojeISO()}"></div>
+        <div><label>Prazo previsto</label><input type="date" name="prazo"></div>
+      </div>
+      <label>Orçamento (R$)</label><input name="orcamento" inputmode="decimal" placeholder="Pode preencher depois">
+      ${htmlBlocoChecklist(itens, 'saida', 'Responsável pelo envio')}
+      <div class="acoes"><button>Registrar envio</button><a class="botao sec" href="#/consertos">Cancelar</a></div>
+    </form>`;
+};
+
+telas.conserto = async (id, _1, ctx) => {
+  const d = await carregarTudo();
+  const c = d.consertos.find((x) => x.id === id);
+  if (!c) return '<p>Conserto não encontrado.</p>';
+  ctx.depois(() => {
+    const f = $('#form-orc');
+    if (f) f.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      c.orcamento = num(f.orcamento.value);
+      c.prazo = f.prazo.value;
+      c.notas = f.notas.value;
+      await DB.salvar('consertos', c);
+      render();
+    });
+  });
+  return `
+    <div class="linha"><h2>Conserto</h2><span class="etiqueta ${c.status === 'oficina' ? 'e-conserto' : 'e-ok'}">${c.status === 'oficina' ? 'Na oficina' : 'Retornou'}</span></div>
+    <div class="cartao">
+      <div><a href="#/maquinas/${c.maquinaId}"><b>${esc(nomeMaquina(d, c.maquinaId))}</b></a></div>
+      <div>Oficina: <b>${esc(c.oficina)}</b>${c.cidade ? ' · ' + esc(c.cidade) : ''}</div>
+      ${c.contato ? `<div class="suave">Contato: ${esc(c.contato)}</div>` : ''}
+      <div>Defeito: ${esc(c.defeito)}</div>
+      <div class="suave">Saiu de ${esc(nomeFazenda(d, c.origemId))} em ${dataBR(c.dataEnvio)}</div>
+      <div class="suave">Orçamento: ${reais(c.orcamento)} · Prazo: ${dataBR(c.prazo)}</div>
+      ${c.status !== 'oficina' ? `<div>Custo final: <b>${reais(c.custoFinal)}</b>${c.nf ? ' · NF ' + esc(c.nf) : ''} · voltou para <b>${esc(nomeFazenda(d, c.destinoId))}</b></div>
+        ${c.servico ? `<div class="suave">Serviço feito: ${esc(c.servico)}</div>` : ''}` : ''}
+    </div>
+    ${c.status === 'oficina' ? `
+      <div class="acoes"><a class="botao" href="#/consertos/${id}/retorno">Registrar retorno</a></div>
+      <h3>Atualizar orçamento / prazo</h3>
+      <form id="form-orc" class="cartao">
+        <div class="duas">
+          <div><label>Orçamento (R$)</label><input name="orcamento" inputmode="decimal" value="${esc(c.orcamento)}"></div>
+          <div><label>Prazo previsto</label><input type="date" name="prazo" value="${esc(c.prazo)}"></div>
+        </div>
+        <label>Anotações</label><textarea name="notas">${esc(c.notas)}</textarea>
+        <div class="acoes"><button class="sec">Salvar</button></div>
+      </form>` : (c.notas ? `<div class="cartao"><b>Anotações:</b> ${esc(c.notas)}</div>` : '')}
+    ${htmlChecklistLeitura(c.saida, 'Checklist de envio')}
+    ${htmlChecklistLeitura(c.retorno, 'Checklist de retorno', c.saida)}
+    <div class="acoes"><button class="sec" onclick="window.print()">Imprimir / PDF</button></div>`;
+};
+
+telas.consertoRetorno = async (id, _1, ctx) => {
+  const d = await carregarTudo();
+  const c = d.consertos.find((x) => x.id === id);
+  if (!c || c.status !== 'oficina') return '<p>Esse conserto não está em aberto.</p>';
+  const itens = c.saida.itens;
+  ctx.depois(() => {
+    const form = $('#form');
+    ligarFotos(form);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(form);
+      c.retorno = lerChecklist(form, itens, 'retorno');
+      c.custoFinal = num(fd.get('custoFinal'));
+      c.nf = fd.get('nf');
+      c.servico = fd.get('servico');
+      c.destinoId = fd.get('destinoId');
+      c.status = 'retornou';
+      await DB.salvar('consertos', c);
+      const m = d.mq[c.maquinaId];
+      if (m) await DB.salvar('maquinas', { ...m, status: 'disponivel', fazendaId: c.destinoId });
+      location.hash = `#/consertos/${c.id}`;
+    });
+  });
+  return `
+    <h2>Retorno do conserto</h2>
+    <div class="cartao"><b>${esc(nomeMaquina(d, c.maquinaId))}</b><div class="suave">${esc(c.oficina)} · enviado em ${dataBR(c.dataEnvio)}</div></div>
+    <form id="form">
+      <div class="duas">
+        <div><label>Data e hora do retorno *</label><input type="datetime-local" name="retorno_data" required value="${hojeISO()}"></div>
+        <div><label>Voltou para a fazenda *</label><select name="destinoId" required>${optFazendas(d, c.origemId)}</select></div>
+      </div>
+      <div class="duas">
+        <div><label>Custo final (R$)</label><input name="custoFinal" inputmode="decimal" value="${esc(c.orcamento)}"></div>
+        <div><label>Nº da nota fiscal</label><input name="nf"></div>
+      </div>
+      <label>Serviço realizado</label><textarea name="servico"></textarea>
+      ${htmlBlocoChecklist(itens, 'retorno', 'Responsável pelo recebimento', c.saida)}
+      <div class="acoes"><button>Confirmar retorno</button><a class="botao sec" href="#/consertos/${id}">Cancelar</a></div>
+    </form>`;
+};
+
+// --- Fazendas ---
+telas.fazendaForm = async (id, _1, ctx) => {
+  const f = id ? await DB.obter('fazendas', id) : {};
+  if (!f) return '<p>Fazenda não encontrada.</p>';
+  ctx.depois(() => {
+    $('#form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      await DB.salvar('fazendas', { ...f, ...Object.fromEntries(new FormData(e.target)) });
+      location.hash = '#/mais';
+    });
+  });
+  return `
+    <h2>${id ? 'Editar fazenda' : 'Nova fazenda'}</h2>
+    <form id="form">
+      <label>Nome *</label><input name="nome" required value="${esc(f.nome)}">
+      <label>Município</label><input name="municipio" value="${esc(f.municipio || 'Tailândia - PA')}">
+      <label>Responsável / gerente</label><input name="responsavel" value="${esc(f.responsavel)}">
+      <div class="acoes"><button>Salvar</button><a class="botao sec" href="#/mais">Cancelar</a></div>
+    </form>`;
+};
+
+// --- Mais: fazendas, checklist, exportação, backup ---
+telas.mais = async (_0, _1, ctx) => {
+  const d = await carregarTudo();
+  const itens = await checklistModelo();
+  ctx.depois(() => {
+    $('#btn-csv-t').onclick = () => exportarTransferencias(d);
+    $('#btn-csv-c').onclick = () => exportarConsertos(d);
+    $('#btn-csv-m').onclick = () => exportarMaquinas(d);
+    $('#btn-backup').onclick = exportarBackup;
+    $('#inp-backup').onchange = importarBackup;
+    $('#form-ck').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const novos = $$('.ck-linha').map((l) => ({
+        id: l.dataset.id,
+        rotulo: $('.ck-rot', l).value.trim(),
+        tipo: $('.ck-tipo', l).value
+      })).filter((i) => i.rotulo);
+      await DB.salvar('config', { id: 'checklist', itens: novos });
+      alert('Checklist salvo. Vale para os próximos registros.');
+      render();
+    });
+    $('#ck-add').onclick = () => {
+      $('#ck-lista').insertAdjacentHTML('beforeend', linhaCk({ id: 'i' + Date.now().toString(36), rotulo: '', tipo: 'ok' }));
+    };
+    $('#ck-lista').addEventListener('click', (e) => { if (e.target.matches('.ck-del')) e.target.closest('.ck-linha').remove(); });
+    $('#ck-reset').onclick = async () => {
+      if (!confirm('Voltar para o checklist padrão?')) return;
+      await DB.remover('config', 'checklist');
+      render();
+    };
+  });
+  const tipos = { ok: 'OK / Problema / N/A', numero: 'Número', nivel: 'Nível (reserva a cheio)', texto: 'Texto livre' };
+  const linhaCk = (i) => `
+    <div class="ck-linha linha" data-id="${esc(i.id)}" style="margin-bottom:8px;flex-wrap:nowrap">
+      <input class="ck-rot" value="${esc(i.rotulo)}" placeholder="Item" style="flex:2">
+      <select class="ck-tipo" style="flex:1">${Object.entries(tipos).map(([k, v]) => `<option value="${k}" ${k === i.tipo ? 'selected' : ''}>${v}</option>`).join('')}</select>
+      <button type="button" class="ck-del perigo" aria-label="Remover" style="padding:10px 12px">✕</button>
+    </div>`;
+  window.linhaCk = linhaCk;
+  return `
+    <div class="linha"><h2>Fazendas</h2><a class="botao" href="#/fazendas/nova">+ Nova</a></div>
+    ${d.fazendas.length ? d.fazendas.sort((a, b) => a.nome.localeCompare(b.nome)).map((f) => `
+      <a class="cartao" href="#/fazendas/${f.id}/editar">
+        <div class="linha"><b>${esc(f.nome)}</b><span class="suave">${d.maquinas.filter((m) => m.fazendaId === f.id && (m.status || 'disponivel') === 'disponivel').length} máquinas</span></div>
+        <div class="suave">${esc(f.municipio || '')}${f.responsavel ? ' · ' + esc(f.responsavel) : ''}</div>
+      </a>`).join('') : '<p class="vazio">Nenhuma fazenda cadastrada.</p>'}
+
+    <h2 style="margin-top:24px">Itens do checklist</h2>
+    <p class="suave">Responsável, observações e fotos sempre entram. Mudanças valem só para registros novos.</p>
+    <form id="form-ck" class="cartao">
+      <div id="ck-lista">${itens.map(linhaCk).join('')}</div>
+      <div class="acoes">
+        <button type="button" class="sec" id="ck-add">+ Item</button>
+        <button>Salvar checklist</button>
+      </div>
+      <button type="button" class="sec" id="ck-reset" style="width:100%">Restaurar padrão</button>
+    </form>
+
+    <h2 style="margin-top:24px">Exportar planilhas (CSV)</h2>
+    <p class="suave">Abre no Excel ou Google Planilhas.</p>
+    <div class="acoes">
+      <button class="sec" id="btn-csv-t">Transferências</button>
+      <button class="sec" id="btn-csv-c">Consertos</button>
+      <button class="sec" id="btn-csv-m">Máquinas</button>
+    </div>
+
+    <h2 style="margin-top:24px">Backup</h2>
+    <div class="aviso">Os dados ficam só neste aparelho. Se limpar o navegador ou perder o celular, perde tudo. Faça backup com frequência e guarde o arquivo no Drive ou WhatsApp.</div>
+    <div class="acoes">
+      <button id="btn-backup">Baixar backup</button>
+      <label class="botao sec" style="margin:0">Restaurar backup<input type="file" id="inp-backup" accept=".json,application/json" hidden></label>
+    </div>
+    <p class="suave" style="text-align:center;margin-top:24px">Controle de Transferências · v1</p>`;
+};
+
+// ---------- Exportação ----------
+function baixar(nome, conteudo, tipo) {
+  const blob = new Blob([conteudo], { type: tipo });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = nome;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+function csv(linhas) {
+  const cel = (v) => {
+    const s = String(v ?? '');
+    return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  // Separador ";" e BOM para o Excel em português abrir certo.
+  return '﻿' + linhas.map((l) => l.map(cel).join(';')).join('\r\n');
+}
+const numBR = (v) => (v === '' || v == null ? '' : String(v).replace('.', ','));
+const resumoCk = (ck) => (ck ? ck.itens.map((it) => `${it.rotulo}: ${textoResposta(it, ck.respostas[it.id])}`).join(' | ') : '');
+const problemas = (ck) => (ck ? ck.itens.filter((it) => it.tipo === 'ok' && ck.respostas[it.id] && ck.respostas[it.id].valor === 'problema').map((it) => it.rotulo).join(', ') : '');
+const horim = (ck) => (ck && ck.respostas.horimetro ? numBR(ck.respostas.horimetro.valor) : '');
+const carimbo = () => new Date().toISOString().slice(0, 10);
+
+function exportarTransferencias(d) {
+  const linhas = [['Máquina', 'Origem', 'Destino', 'Status', 'Saída', 'Resp. saída', 'Horímetro saída', 'Problemas na saída', 'Chegada', 'Resp. chegada', 'Horímetro chegada', 'Problemas na chegada', 'Divergências', 'Transporte', 'Motorista', 'Checklist saída', 'Checklist chegada']];
+  for (const t of d.transferencias.sort(porData('dataSaida'))) {
+    linhas.push([nomeMaquina(d, t.maquinaId), nomeFazenda(d, t.origemId), nomeFazenda(d, t.destinoId),
+      t.status === 'transito' ? 'Em trânsito' : 'Recebida', dataBR(t.dataSaida), t.saida?.responsavel, horim(t.saida), problemas(t.saida),
+      t.chegada ? dataBR(t.chegada.data) : '', t.chegada?.responsavel, horim(t.chegada), problemas(t.chegada),
+      divergencias(t.saida, t.chegada).join(' | '), t.transporte, t.motorista, resumoCk(t.saida), resumoCk(t.chegada)]);
+  }
+  baixar(`transferencias-${carimbo()}.csv`, csv(linhas), 'text/csv;charset=utf-8');
+}
+function exportarConsertos(d) {
+  const linhas = [['Máquina', 'Fazenda de origem', 'Oficina', 'Cidade', 'Defeito', 'Status', 'Envio', 'Prazo', 'Orçamento', 'Retorno', 'Custo final', 'NF', 'Serviço realizado', 'Voltou para', 'Resp. envio', 'Resp. retorno']];
+  for (const c of d.consertos.sort(porData('dataEnvio'))) {
+    linhas.push([nomeMaquina(d, c.maquinaId), nomeFazenda(d, c.origemId), c.oficina, c.cidade, c.defeito,
+      c.status === 'oficina' ? 'Na oficina' : 'Retornou', dataBR(c.dataEnvio), c.prazo ? dataBR(c.prazo) : '', numBR(c.orcamento),
+      c.retorno ? dataBR(c.retorno.data) : '', numBR(c.custoFinal), c.nf, c.servico,
+      c.destinoId ? nomeFazenda(d, c.destinoId) : '', c.saida?.responsavel, c.retorno?.responsavel]);
+  }
+  baixar(`consertos-${carimbo()}.csv`, csv(linhas), 'text/csv;charset=utf-8');
+}
+function exportarMaquinas(d) {
+  const linhas = [['Código', 'Nome', 'Tipo', 'Marca/modelo', 'Série/placa', 'Situação', 'Fazenda', 'Gasto com consertos']];
+  for (const m of d.maquinas) {
+    const gasto = d.consertos.filter((c) => c.maquinaId === m.id).reduce((s, c) => s + (Number(c.custoFinal) || 0), 0);
+    linhas.push([m.codigo, m.nome, m.tipo, m.marca, m.serie, STATUS_MAQ[m.status || 'disponivel'][0], nomeFazenda(d, m.fazendaId), numBR(gasto)]);
+  }
+  baixar(`maquinas-${carimbo()}.csv`, csv(linhas), 'text/csv;charset=utf-8');
+}
+async function exportarBackup() {
+  const dados = { app: 'controle-de-transferencias', versao: 1, geradoEm: new Date().toISOString() };
+  for (const l of DB.LOJAS) dados[l] = await DB.todos(l);
+  baixar(`backup-transferencias-${carimbo()}.json`, JSON.stringify(dados), 'application/json');
+}
+async function importarBackup(e) {
+  const arq = e.target.files[0];
+  if (!arq) return;
+  try {
+    const dados = JSON.parse(await arq.text());
+    if (dados.app !== 'controle-de-transferencias') throw new Error('arquivo não é um backup deste app');
+    if (!confirm('Isso vai SUBSTITUIR todos os dados deste aparelho pelos do backup. Continuar?')) return;
+    for (const l of DB.LOJAS) {
+      await DB.limpar(l);
+      for (const obj of dados[l] || []) await DB.salvar(l, obj);
+    }
+    alert('Backup restaurado.');
+    location.hash = '#/';
+    render();
+  } catch (err) {
+    alert('Não foi possível restaurar: ' + err.message);
+  } finally {
+    e.target.value = '';
+  }
+}
+
+// ---------- Roteador ----------
+
+const rotas = [
+  [/^\/$/, 'inicio', 'inicio'],
+  [/^\/maquinas$/, 'maquinas', 'maquinas'],
+  [/^\/maquinas\/nova$/, 'maquinaForm', 'maquinas'],
+  [/^\/maquinas\/([^/]+)\/editar$/, 'maquinaForm', 'maquinas'],
+  [/^\/maquinas\/([^/]+)$/, 'maquina', 'maquinas'],
+  [/^\/transferencias$/, 'transferencias', 'transferencias'],
+  [/^\/transferencias\/nova$/, 'transferenciaNova', 'transferencias'],
+  [/^\/transferencias\/([^/]+)\/chegada$/, 'transferenciaChegada', 'transferencias'],
+  [/^\/transferencias\/([^/]+)$/, 'transferencia', 'transferencias'],
+  [/^\/consertos$/, 'consertos', 'consertos'],
+  [/^\/consertos\/novo$/, 'consertoNovo', 'consertos'],
+  [/^\/consertos\/([^/]+)\/retorno$/, 'consertoRetorno', 'consertos'],
+  [/^\/consertos\/([^/]+)$/, 'conserto', 'consertos'],
+  [/^\/fazendas\/nova$/, 'fazendaForm', 'mais'],
+  [/^\/fazendas\/([^/]+)\/editar$/, 'fazendaForm', 'mais'],
+  [/^\/mais$/, 'mais', 'mais']
+];
+
+let renderAtual = 0;
+async function render() {
+  const minha = ++renderAtual;
+  const bruto = location.hash.replace(/^#/, '') || '/';
+  const [caminho, qs] = bruto.split('?');
+  const params = new URLSearchParams(qs || '');
+  let tela = 'inicio', aba = 'inicio', arg;
+  for (const [re, t, a] of rotas) {
+    const m = caminho.match(re);
+    if (m) { tela = t; aba = a; arg = m[1]; break; }
+  }
+  try {
+    const fila = [];
+    const html = await telas[tela](arg, params, { depois: (fn) => fila.push(fn) });
+    if (minha !== renderAtual) return; // outra tela foi aberta enquanto esta carregava
+    $('#app').innerHTML = html;
+    fila.forEach((fn) => fn());
+  } catch (err) {
+    console.error(err);
+    $('#app').innerHTML = `<div class="aviso">Erro ao abrir a tela: ${esc(err.message)}</div>`;
+  }
+  $$('.abas a').forEach((a) => a.classList.toggle('ativa', a.dataset.aba === aba));
+  window.scrollTo(0, 0);
+}
+
+function statusRede() {
+  const el = $('#status-rede');
+  el.textContent = navigator.onLine ? 'online' : 'offline';
+}
+
+window.addEventListener('hashchange', render);
+window.addEventListener('online', statusRede);
+window.addEventListener('offline', statusRede);
+statusRede();
+render();
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
