@@ -29,6 +29,7 @@ const CHECKLIST_PADRAO = [
   { id: 'pneus', rotulo: 'Pneus / esteiras', tipo: 'ok' },
   { id: 'oleo_motor', rotulo: 'Nível de óleo do motor', tipo: 'ok' },
   { id: 'oleo_hidraulico', rotulo: 'Óleo hidráulico', tipo: 'ok' },
+  { id: 'baterias', rotulo: 'Baterias', tipo: 'ok' },
   { id: 'vazamentos', rotulo: 'Sem vazamentos', tipo: 'ok' },
   { id: 'avarias', rotulo: 'Lataria / estrutura sem avarias', tipo: 'ok' },
   { id: 'luzes', rotulo: 'Luzes e sinalização', tipo: 'ok' },

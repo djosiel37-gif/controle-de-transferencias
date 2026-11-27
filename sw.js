@@ -1,6 +1,6 @@
 // Service worker: guarda os arquivos do app para funcionar sem internet.
 // Ao alterar qualquer arquivo do app, aumente a versão abaixo.
-const VERSAO = 'ct-v1';
+const VERSAO = 'ct-v2';
 const ARQUIVOS = [
   './',
   'index.html',
