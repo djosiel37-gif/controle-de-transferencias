@@ -399,10 +399,33 @@ telas.transferenciaNova = async (_, params, ctx) => {
     </form>`;
 };
 
+// Cancelar/excluir um registro e devolver a máquina para onde estava antes.
+// Só é permitido se for a última movimentação da máquina (senão bagunçaria o histórico).
+function ultimaMovimentacao(d, maquinaId, idRegistro) {
+  const eventos = [
+    ...d.transferencias.filter((t) => t.maquinaId === maquinaId).map((t) => ({ id: t.id, data: t.dataSaida })),
+    ...d.consertos.filter((c) => c.maquinaId === maquinaId).map((c) => ({ id: c.id, data: c.dataEnvio }))
+  ].sort(porData('data'));
+  return eventos.length && eventos[0].id === idRegistro;
+}
+async function cancelarRegistro(d, loja, reg, msg) {
+  if (!confirm(msg)) return;
+  await DB.remover(loja, reg.id);
+  const m = d.mq[reg.maquinaId];
+  if (m) await DB.salvar('maquinas', { ...m, status: 'disponivel', fazendaId: reg.origemId });
+  location.hash = m ? `#/maquinas/${m.id}` : '#/';
+}
+
 telas.transferencia = async (id, _1, ctx) => {
   const d = await carregarTudo();
   const t = d.transferencias.find((x) => x.id === id);
   if (!t) return '<p>Transferência não encontrada.</p>';
+  const podeCancelar = ultimaMovimentacao(d, t.maquinaId, t.id);
+  ctx.depois(() => {
+    const b = $('#btn-cancelar');
+    if (b) b.onclick = () => cancelarRegistro(d, 'transferencias', t,
+      `Cancelar esta transferência? O registro e o checklist serão apagados e a máquina volta para ${nomeFazenda(d, t.origemId)}. Não dá para desfazer.`);
+  });
   return `
     <div class="linha"><h2>Transferência</h2><span class="etiqueta ${t.status === 'transito' ? 'e-transito' : 'e-ok'}">${t.status === 'transito' ? 'Em trânsito' : 'Recebida'}</span></div>
     <div class="cartao">
@@ -414,7 +437,9 @@ telas.transferencia = async (id, _1, ctx) => {
     ${t.status === 'transito' ? `<div class="acoes"><a class="botao" href="#/transferencias/${id}/chegada">Registrar chegada</a></div>` : ''}
     ${htmlChecklistLeitura(t.saida, 'Checklist de saída')}
     ${htmlChecklistLeitura(t.chegada, 'Checklist de chegada', t.saida)}
-    <div class="acoes"><button class="sec" onclick="window.print()">Imprimir / PDF</button></div>`;
+    <div class="acoes"><button class="sec" onclick="window.print()">Imprimir / PDF</button></div>
+    ${podeCancelar ? '<div class="acoes"><button class="perigo" id="btn-cancelar">Cancelar transferência</button></div>'
+      : '<p class="suave">Só dá para cancelar a última movimentação da máquina.</p>'}`;
 };
 
 telas.transferenciaChegada = async (id, _1, ctx) => {
@@ -519,7 +544,11 @@ telas.conserto = async (id, _1, ctx) => {
   const d = await carregarTudo();
   const c = d.consertos.find((x) => x.id === id);
   if (!c) return '<p>Conserto não encontrado.</p>';
+  const podeCancelar = ultimaMovimentacao(d, c.maquinaId, c.id);
   ctx.depois(() => {
+    const b = $('#btn-cancelar');
+    if (b) b.onclick = () => cancelarRegistro(d, 'consertos', c,
+      `Excluir este conserto? O registro e o checklist serão apagados e a máquina volta para ${nomeFazenda(d, c.origemId)}. Não dá para desfazer.`);
     const f = $('#form-orc');
     if (f) f.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -555,7 +584,9 @@ telas.conserto = async (id, _1, ctx) => {
       </form>` : (c.notas ? `<div class="cartao"><b>Anotações:</b> ${esc(c.notas)}</div>` : '')}
     ${htmlChecklistLeitura(c.saida, 'Checklist de envio')}
     ${htmlChecklistLeitura(c.retorno, 'Checklist de retorno', c.saida)}
-    <div class="acoes"><button class="sec" onclick="window.print()">Imprimir / PDF</button></div>`;
+    <div class="acoes"><button class="sec" onclick="window.print()">Imprimir / PDF</button></div>
+    ${podeCancelar ? '<div class="acoes"><button class="perigo" id="btn-cancelar">Excluir conserto</button></div>'
+      : '<p class="suave">Só dá para excluir a última movimentação da máquina.</p>'}`;
 };
 
 telas.consertoRetorno = async (id, _1, ctx) => {
@@ -692,7 +723,7 @@ telas.mais = async (_0, _1, ctx) => {
       <button id="btn-backup">Baixar backup</button>
       <label class="botao sec" style="margin:0">Restaurar backup<input type="file" id="inp-backup" accept=".json,application/json" hidden></label>
     </div>
-    <p class="suave" style="text-align:center;margin-top:24px">Controle de Transferências · v3</p>`;
+    <p class="suave" style="text-align:center;margin-top:24px">Controle de Transferências · v4</p>`;
 };
 
 // ---------- Exportação ----------
