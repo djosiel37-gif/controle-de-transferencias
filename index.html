@@ -18,6 +18,13 @@
 
   <main id="app" aria-live="polite"></main>
 
+  <div id="bloqueio-rede" class="tela-cheia" hidden>
+    <div><b>Sem internet</b>
+      <p>O app só funciona conectado, para garantir que cada registro chegue ao servidor.</p>
+      <p class="suave">Anote no papel e lance quando tiver sinal. Esta tela some sozinha quando a conexão voltar.</p></div>
+  </div>
+  <div id="gravando" class="tela-cheia translucida" hidden><div><b>Enviando para o servidor…</b><p class="suave">Aguarde a confirmação.</p></div></div>
+
   <nav class="abas">
     <a href="#/" data-aba="inicio">Início</a>
     <a href="#/maquinas" data-aba="maquinas">Máquinas</a>
