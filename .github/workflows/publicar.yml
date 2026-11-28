@@ -1,5 +1,6 @@
-# Publica o app em https://controle-transferencias.web.app e as regras do banco
-# toda vez que algo entra na branch main.
+# Publica o app em https://controle-transferencias.web.app toda vez que algo entra na branch main.
+# As regras do banco (firestore.rules) continuam sendo coladas no console: a chave padrão
+# do Firebase não tem permissão para publicá-las.
 # Precisa do segredo FIREBASE_SERVICE_ACCOUNT (chave JSON da conta de serviço do Firebase)
 # em Settings → Secrets and variables → Actions.
 name: Publicar no Firebase
@@ -33,7 +34,7 @@ jobs:
           fi
           printf '%s' "$CHAVE" > "$RUNNER_TEMP/chave.json"
 
-      - name: Publicar app e regras
+      - name: Publicar app
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/chave.json
-        run: npx --yes firebase-tools@13 deploy --only hosting,firestore:rules --project controle-transferencias --non-interactive
+        run: npx --yes firebase-tools@13 deploy --only hosting --project controle-transferencias --non-interactive

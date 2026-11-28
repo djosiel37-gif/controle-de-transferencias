@@ -35,7 +35,7 @@ Os dados ficam num banco online (Firebase, do Google) e numa cópia em cada apar
 2. Em *Visão geral do projeto*, adicione um app **Web** (ícone `</>`) e copie o objeto `firebaseConfig` para `firebase-config.js`.
 3. *Authentication → Começar →* ative **E-mail/senha**.
 4. *Firestore Database → Criar banco* (local `southamerica-east1`, modo produção).
-5. Regras do banco: publicadas automaticamente (veja *Endereço do app*). Sem a publicação automática, cole `firestore.rules` em *Firestore Database → Regras → Publicar*.
+5. *Firestore Database → Regras*: cole o conteúdo de `firestore.rules` e clique em **Publicar**.
 6. Abra o app, toque em **Primeiro acesso** e crie o administrador. Isso só funciona uma vez.
 7. Em *Mais → Usuários*, crie os operadores.
 
@@ -49,7 +49,7 @@ Para o tamanho de uma operação de fazendas, o plano gratuito (Spark) deve bast
 
 **https://controle-transferencias.web.app** (Firebase Hosting, gratuito).
 
-Toda alteração que entra na branch `main` é publicada sozinha pelo GitHub Actions (`.github/workflows/publicar.yml`), junto com as regras do banco (`firestore.rules`). Não precisa mais colar as regras no console.
+Toda alteração que entra na branch `main` é publicada sozinha pelo GitHub Actions (`.github/workflows/publicar.yml`). Quando `firestore.rules` mudar, cole o arquivo em *Firestore Database → Regras → Publicar* (a chave padrão do Firebase não tem permissão para publicar regras).
 
 ### Configurar a publicação automática (uma vez)
 
