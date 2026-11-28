@@ -776,7 +776,7 @@ telas.mais = async (_0, _1, ctx) => {
       <button class="sec" id="btn-backup">Baixar cópia</button>
       <label class="botao sec" style="margin:0">Importar backup<input type="file" id="inp-backup" accept=".json,application/json" hidden></label>
     </div>` : ''}
-    <p class="suave" style="text-align:center;margin-top:24px">Controle de Transferências · v6</p>`;
+    <p class="suave" style="text-align:center;margin-top:24px">Controle de Transferências · v7</p>`;
 };
 
 // --- Usuários (só administrador) ---
@@ -1100,6 +1100,17 @@ function telaSemConfiguracao() {
 }
 
 // ---------- Início ----------
+// O endereço oficial passou a ser o do Firebase. Quem ainda abre pelo GitHub vê o aviso.
+const ENDERECO_OFICIAL = 'https://controle-transferencias.web.app/';
+if (location.hostname.endsWith('github.io')) {
+  const aviso = document.createElement('div');
+  aviso.className = 'aviso';
+  aviso.style.margin = '12px 16px 0';
+  aviso.innerHTML = `O app mudou de endereço. Abra <a href="${ENDERECO_OFICIAL}"><b>controle-transferencias.web.app</b></a>,
+    entre com seu usuário e adicione de novo à tela inicial. Seus dados continuam lá.`;
+  document.body.insertBefore(aviso, $('#app'));
+}
+
 function statusRede() {
   const el = $('#status-rede');
   el.textContent = navigator.onLine ? 'online' : 'offline';

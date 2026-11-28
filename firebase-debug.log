@@ -1,0 +1,65 @@
+[debug] [2026-11-28T00:00:58.427Z] ----------------------------------------------------------------------
+[debug] [2026-11-28T00:00:58.428Z] Command:       /opt/node22/bin/node /tmp/claude-0/fb/node_modules/.bin/firebase emulators:start --only hosting --project controle-transferencias
+[debug] [2026-11-28T00:00:58.428Z] CLI Version:   13.35.1
+[debug] [2026-11-28T00:00:58.428Z] Platform:      linux
+[debug] [2026-11-28T00:00:58.428Z] Node Version:  v22.23.5
+[debug] [2026-11-28T00:00:58.429Z] Time:          Sat Nov 28 2026 00:00:58 GMT+0000 (Coordinated Universal Time)
+[debug] [2026-11-28T00:00:58.429Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-11-28T00:00:58.430Z] >>> [apiv2][query] GET https://firebase-public.firebaseio.com/cli.json [none]
+[debug] [2026-11-28T00:00:58.567Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] Failed to authenticate, have you run firebase login?
+[warn] ⚠  emulators: You are not currently authenticated so some features may not work correctly. Please run firebase login to authenticate the CLI. 
+[info] i  emulators: Starting emulators: hosting {"metadata":{"emulator":{"name":"hub"},"message":"Starting emulators: hosting"}}
+[warn] ⚠  hosting: Error when trying to check port 5000 on ::1: Error: listen EAFNOSUPPORT: address family not supported ::1:5000 {"metadata":{"emulator":{"name":"hosting"},"message":"Error when trying to check port 5000 on ::1: Error: listen EAFNOSUPPORT: address family not supported ::1:5000"}}
+[warn] ⚠  hosting: Port 5000 is available on 127.0.0.1 but not ::1. This may cause issues with some clients. {"metadata":{"emulator":{"name":"hosting"},"message":"Port 5000 is available on 127.0.0.1 but not ::1. This may cause issues with some clients."}}
+[warn] ⚠  hosting: If you encounter connectivity issues, consider switching to a different port or explicitly specifying "host": "<ip address>" instead of hostname in firebase.json {"metadata":{"emulator":{"name":"hosting"},"message":"If you encounter connectivity issues, consider switching to a different port or explicitly specifying \"host\": \"<ip address>\" instead of hostname in firebase.json"}}
+[warn] ⚠  hub: Error when trying to check port 4401 on ::1: Error: listen EAFNOSUPPORT: address family not supported ::1:4401 {"metadata":{"emulator":{"name":"hub"},"message":"Error when trying to check port 4401 on ::1: Error: listen EAFNOSUPPORT: address family not supported ::1:4401"}}
+[warn] ⚠  hub: Port 4400 is available on 127.0.0.1 but not ::1. This may cause issues with some clients. {"metadata":{"emulator":{"name":"hub"},"message":"Port 4400 is available on 127.0.0.1 but not ::1. This may cause issues with some clients."}}
+[warn] ⚠  hub: If you encounter connectivity issues, consider switching to a different port or explicitly specifying "host": "<ip address>" instead of hostname in firebase.json {"metadata":{"emulator":{"name":"hub"},"message":"If you encounter connectivity issues, consider switching to a different port or explicitly specifying \"host\": \"<ip address>\" instead of hostname in firebase.json"}}
+[warn] ⚠  hub: emulator hub unable to start on port 4400, starting on 4401 instead. {"metadata":{"emulator":{"name":"hub"},"message":"emulator hub unable to start on port 4400, starting on 4401 instead."}}
+[warn] ⚠  logging: Error when trying to check port 4501 on ::1: Error: listen EAFNOSUPPORT: address family not supported ::1:4501 {"metadata":{"emulator":{"name":"logging"},"message":"Error when trying to check port 4501 on ::1: Error: listen EAFNOSUPPORT: address family not supported ::1:4501"}}
+[warn] ⚠  logging: Port 4500 is available on 127.0.0.1 but not ::1. This may cause issues with some clients. {"metadata":{"emulator":{"name":"logging"},"message":"Port 4500 is available on 127.0.0.1 but not ::1. This may cause issues with some clients."}}
+[warn] ⚠  logging: If you encounter connectivity issues, consider switching to a different port or explicitly specifying "host": "<ip address>" instead of hostname in firebase.json {"metadata":{"emulator":{"name":"logging"},"message":"If you encounter connectivity issues, consider switching to a different port or explicitly specifying \"host\": \"<ip address>\" instead of hostname in firebase.json"}}
+[warn] ⚠  logging: Logging Emulator unable to start on port 4500, starting on 4501 instead. {"metadata":{"emulator":{"name":"logging"},"message":"Logging Emulator unable to start on port 4500, starting on 4501 instead."}}
+[debug] [2026-11-28T00:00:58.806Z] assigned listening specs for emulators {"user":{"hosting":[{"address":"127.0.0.1","family":"IPv4","port":5000}],"hub":[{"address":"127.0.0.1","family":"IPv4","port":4401}],"logging":[{"address":"127.0.0.1","family":"IPv4","port":4501}]},"metadata":{"message":"assigned listening specs for emulators"}}
+[debug] [2026-11-28T00:00:58.808Z] [hub] writing locator at /tmp/hub-controle-transferencias.json
+[debug] [2026-11-28T00:00:58.810Z] <<< [apiv2][status] GET https://firebase-public.firebaseio.com/cli.json 403
+[debug] [2026-11-28T00:00:58.810Z] <<< [apiv2][body] GET https://firebase-public.firebaseio.com/cli.json "request blocked: no rule or allowlist entry allows host \"firebase-public.firebaseio.com\""
+[warn] ⚠  Unable to fetch the CLI MOTD and remote config. This is not a fatal error, but may indicate an issue with your network connection. 
+[debug] [2026-11-28T00:00:58.810Z] Failed to fetch MOTD FirebaseError: Unable to parse JSON: SyntaxError: Unexpected token 'r', "request bl"... is not valid JSON
+[debug] [2026-11-28T00:00:58.812Z] No OAuth tokens found
+[debug] [2026-11-28T00:00:58.813Z] No OAuth tokens found
+[debug] [2026-11-28T00:00:58.813Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-11-28T00:00:58.813Z] Failed to list hosting sites
+[debug] Failed to authenticate, have you run firebase login?
+[debug] [2026-11-28T00:00:58.813Z] No OAuth tokens found
+[debug] [2026-11-28T00:00:58.813Z] No OAuth tokens found
+[debug] [2026-11-28T00:00:58.813Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-11-28T00:00:58.813Z] fetchWebSetup error: FirebaseError: Failed to authenticate, have you run firebase login?
+[warn] ⚠  hosting: Could not fetch web app configuration and there is no cached configuration on this machine. Check your internet connection and make sure you are authenticated. To continue, you must call firebase.initializeApp({...}) in your code before using Firebase. 
+[debug] [2026-11-28T00:00:58.813Z] No OAuth tokens found
+[debug] [2026-11-28T00:00:58.813Z] No OAuth tokens found
+[debug] [2026-11-28T00:00:58.813Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-11-28T00:00:58.813Z] Failed to authenticate, have you run firebase login? (original: Could not load the default credentials. Browse to https://cloud.google.com/docs/authentication/getting-started for more information.)
+[info] ✔  hosting[controle-transferencias]: Local server: http://127.0.0.1:5000 {"metadata":{"emulator":{"name":"hosting"},"message":"Local server: http://127.0.0.1:5000"}}
+[warn] ⚠  emulators: The Emulator UI is not starting, either because none of the running emulators have a UI component or the Emulator UI cannot determine the Project ID. Pass the --project flag to specify a project. {"metadata":{"emulator":{"name":"hub"},"message":"The Emulator UI is not starting, either because none of the running emulators have a UI component or the Emulator UI cannot determine the Project ID. Pass the --project flag to specify a project."}}
+[debug] [2026-11-28T00:00:58.821Z] Could not find VSCode notification endpoint: FetchError: request to http://localhost:40001/vscode/notify failed, reason: connect ECONNREFUSED 127.0.0.1:40001. If you are not running the Firebase Data Connect VSCode extension, this is expected and not an issue.
+[info] 
+┌─────────────────────────────────────────────────────────────┐
+│ ✔  All emulators ready! It is now safe to connect your app. │
+└─────────────────────────────────────────────────────────────┘
+
+┌──────────┬────────────────┐
+│ Emulator │ Host:Port      │
+├──────────┼────────────────┤
+│ Hosting  │ 127.0.0.1:5000 │
+└──────────┴────────────────┘
+  Emulator Hub host: 127.0.0.1 port: 4401
+  Other reserved ports: 4501
+
+Issues? Report them at https://github.com/firebase/firebase-tools/issues and attach the *-debug.log files.
+ 
+[info] i  hosting: 127.0.0.1 - - [28/Nov/2026:00:01:15 +0000] "HEAD / HTTP/1.1" 200 1103 "-" "curl/8.5.0" {"metadata":{"emulator":{"name":"hosting"},"message":"127.0.0.1 - - [28/Nov/2026:00:01:15 +0000] \"HEAD / HTTP/1.1\" 200 1103 \"-\" \"curl/8.5.0\""}}
+[info] i  hosting: 127.0.0.1 - - [28/Nov/2026:00:01:15 +0000] "HEAD /sw.js HTTP/1.1" 200 1619 "-" "curl/8.5.0" {"metadata":{"emulator":{"name":"hosting"},"message":"127.0.0.1 - - [28/Nov/2026:00:01:15 +0000] \"HEAD /sw.js HTTP/1.1\" 200 1619 \"-\" \"curl/8.5.0\""}}
+[info] i  hosting: 127.0.0.1 - - [28/Nov/2026:00:01:15 +0000] "HEAD /index.html HTTP/1.1" 200 1103 "-" "curl/8.5.0" {"metadata":{"emulator":{"name":"hosting"},"message":"127.0.0.1 - - [28/Nov/2026:00:01:15 +0000] \"HEAD /index.html HTTP/1.1\" 200 1103 \"-\" \"curl/8.5.0\""}}

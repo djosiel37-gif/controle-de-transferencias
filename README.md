@@ -35,7 +35,7 @@ Os dados ficam num banco online (Firebase, do Google) e numa cópia em cada apar
 2. Em *Visão geral do projeto*, adicione um app **Web** (ícone `</>`) e copie o objeto `firebaseConfig` para `firebase-config.js`.
 3. *Authentication → Começar →* ative **E-mail/senha**.
 4. *Firestore Database → Criar banco* (local `southamerica-east1`, modo produção).
-5. *Firestore Database → Regras*: cole o conteúdo de `firestore.rules` e clique em **Publicar**.
+5. Regras do banco: publicadas automaticamente (veja *Endereço do app*). Sem a publicação automática, cole `firestore.rules` em *Firestore Database → Regras → Publicar*.
 6. Abra o app, toque em **Primeiro acesso** e crie o administrador. Isso só funciona uma vez.
 7. Em *Mais → Usuários*, crie os operadores.
 
@@ -44,6 +44,24 @@ Dados da versão antiga (que ficavam só no celular): entre como administrador *
 ### Limites do plano gratuito do Firebase
 
 Para o tamanho de uma operação de fazendas, o plano gratuito (Spark) deve bastar: 1 GB de armazenamento, 50 mil leituras e 20 mil gravações por dia. As fotos são o que mais ocupa (cerca de 100 KB cada, comprimidas), então 1 GB dá para algo na casa de 10 mil fotos. Acompanhe em *Firestore → Uso*.
+
+## Endereço do app
+
+**https://controle-transferencias.web.app** (Firebase Hosting, gratuito).
+
+Toda alteração que entra na branch `main` é publicada sozinha pelo GitHub Actions (`.github/workflows/publicar.yml`), junto com as regras do banco (`firestore.rules`). Não precisa mais colar as regras no console.
+
+### Configurar a publicação automática (uma vez)
+
+1. No Console do Firebase: ⚙️ *Configurações do projeto → Contas de serviço → Gerar nova chave privada*. Baixa um arquivo `.json`.
+2. No GitHub: *Settings → Secrets and variables → Actions → New repository secret*.
+   - Name: `FIREBASE_SERVICE_ACCOUNT`
+   - Secret: cole o conteúdo inteiro do arquivo `.json`.
+3. Em *Actions → Publicar no Firebase → Run workflow* para publicar a primeira vez.
+
+O arquivo `.json` é uma senha de administrador do projeto: não mande para ninguém e apague do computador depois de colar no GitHub.
+
+O endereço antigo do GitHub Pages mostra um aviso apontando para o novo. Quando todos tiverem migrado, desative o Pages em *Settings → Pages*.
 
 ## Rodar no computador
 
@@ -66,6 +84,7 @@ Para testar sem mexer no banco real, use o Firebase Emulator (`firebase emulator
 | `db.js` | Login e dados (Firebase Auth + Firestore com cópia offline) |
 | `firebase-config.js` | Identificação do projeto Firebase |
 | `firestore.rules` | Regras de acesso do banco (quem pode ler e gravar o quê) |
+| `firebase.json`, `.firebaserc`, `.github/workflows/publicar.yml` | Publicação no Firebase Hosting |
 | `vendor/firebase/` | SDK do Firebase 10.14.1, copiado para abrir sem internet |
 | `styles.css` | Visual |
 | `sw.js` | Service worker (funcionamento offline). Ao alterar arquivos, aumente a `VERSAO` |

@@ -1,0 +1,39 @@
+# Publica o app em https://controle-transferencias.web.app e as regras do banco
+# toda vez que algo entra na branch main.
+# Precisa do segredo FIREBASE_SERVICE_ACCOUNT (chave JSON da conta de serviço do Firebase)
+# em Settings → Secrets and variables → Actions.
+name: Publicar no Firebase
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: publicar
+  cancel-in-progress: false
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Gravar credencial
+        env:
+          CHAVE: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$CHAVE" ]; then
+            echo "::error::Falta o segredo FIREBASE_SERVICE_ACCOUNT (veja o README)."
+            exit 1
+          fi
+          printf '%s' "$CHAVE" > "$RUNNER_TEMP/chave.json"
+
+      - name: Publicar app e regras
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/chave.json
+        run: npx --yes firebase-tools@13 deploy --only hosting,firestore:rules --project controle-transferencias --non-interactive
