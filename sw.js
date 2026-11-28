@@ -1,13 +1,14 @@
 // Service worker: guarda os arquivos do app para funcionar sem internet.
 // Estratégia: com internet, busca sempre a versão mais nova (e atualiza a cópia guardada);
 // sem internet, usa a cópia guardada. Ao alterar arquivos do app, aumente a versão abaixo.
-const VERSAO = 'ct-v9';
+const VERSAO = 'ct-v10';
 const ARQUIVOS = [
   './',
   'index.html',
   'styles.css',
   'db.js',
   'app.js',
+  'bens-lista.js',
   'firebase-config.js',
   'vendor/firebase/firebase-app.js',
   'vendor/firebase/firebase-auth.js',

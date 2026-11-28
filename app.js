@@ -1,6 +1,7 @@
 /* Controle de Transferências — app principal. */
 import { firebaseConfig } from './firebase-config.js';
 import { iniciar, sessao, DB, normalizarUsuario } from './db.js';
+import { BENS, FAZENDAS_BENS } from './bens-lista.js';
 
 // ---------- Utilidades ----------
 const $ = (sel, raiz = document) => raiz.querySelector(sel);
@@ -706,6 +707,123 @@ telas.fazendaForm = async (id, _1, ctx) => {
     </form>`;
 };
 
+// --- Importar a lista de bens (Relatório de Bens das fazendas) ---
+// "CL-05", "cl 5" e "CL05" são a mesma máquina.
+const chaveCodigo = (c) => {
+  const s = String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const m = s.match(/^([A-Z]+)0*(\d+)$/);
+  return m ? m[1] + m[2] : s;
+};
+const chaveSerie = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+const semAcento = (v) => String(v || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+const TIPOS_DESMARCADOS = new Set(['Eletrodoméstico']);
+
+function planoImportacao(d) {
+  const porCodigo = new Map(d.maquinas.filter((m) => m.codigo).map((m) => [chaveCodigo(m.codigo), m]));
+  const porSerie = new Map();
+  for (const m of d.maquinas) {
+    for (const parte of String(m.serie || '').split(/[·,;/]| - /)) {
+      const k = chaveSerie(parte.replace(/^\s*(placa|chassi|renavam)\s*/i, ''));
+      if (k.length >= 8) porSerie.set(k, m);
+    }
+  }
+  const fazendas = {};
+  for (const [sigla, nome] of Object.entries(FAZENDAS_BENS)) {
+    const alvo = semAcento(nome).replace(/^fazenda\s+/, '');
+    const achada = d.fazendas.find((f) => semAcento(f.nome).includes(alvo));
+    fazendas[sigla] = achada
+      ? { id: achada.id, nome: achada.nome, nova: false }
+      : { id: 'faz-' + alvo.replace(/\s+/g, '-'), nome, nova: true };
+  }
+  const itens = BENS.map((b) => {
+    const chassi = (b.serie.match(/Chassi\s+(\S+)/) || [null, b.serie])[1];
+    const k = chaveSerie(chassi);
+    const existente = porCodigo.get(chaveCodigo(b.codigo)) || (k.length >= 8 && porSerie.get(k)) || null;
+    return { ...b, existente };
+  });
+  return { fazendas, itens };
+}
+
+telas.importarBens = async (_0, _1, ctx) => {
+  if (!sessao.admin) return '<p>Só o administrador pode fazer isso.</p>';
+  const d = await carregarTudo();
+  const { fazendas, itens } = planoImportacao(d);
+  const novos = itens.filter((i) => !i.existente);
+  const jaTem = itens.length - novos.length;
+  ctx.depois(() => {
+    const form = $('#form');
+    const contar = () => {
+      const n = $$('input[name="bem"]:checked', form).length;
+      const b = $('#btn-importar');
+      b.textContent = n ? `Cadastrar ${n} ${n > 1 ? 'itens' : 'item'}` : 'Nada marcado';
+      b.disabled = !n;
+    };
+    form.addEventListener('change', contar);
+    $('#marcar-todos').onclick = () => { $$('input[name="bem"]:not(:disabled)', form).forEach((c) => (c.checked = true)); contar(); };
+    $('#desmarcar-todos').onclick = () => { $$('input[name="bem"]', form).forEach((c) => (c.checked = false)); contar(); };
+    contar();
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const marcados = new Set($$('input[name="bem"]:checked', form).map((c) => c.value));
+      const escolhidos = novos.filter((b) => marcados.has(b.codigo));
+      if (!escolhidos.length) return;
+      const criar = [...new Set(escolhidos.map((b) => b.fazenda))].map((s) => fazendas[s]).filter((f) => f.nova);
+      const aviso = criar.length ? `\n\nTambém vou cadastrar a ${criar.map((f) => f.nome).join(' e a ')}.` : '';
+      if (!confirm(`Cadastrar ${escolhidos.length} máquinas/equipamentos?${aviso}`)) return;
+      const ops = criar.map((f) => ['salvar', 'fazendas', { id: f.id, nome: f.nome, municipio: '', responsavel: '' }]);
+      for (const b of escolhidos) {
+        const obs = [
+          b.patrimonio && b.patrimonio !== b.codigo ? `Patrimônio ${b.patrimonio}` : '',
+          b.proprietario ? `Proprietário: ${b.proprietario}` : '',
+          b.compra ? `Compra: ${dataBR(b.compra)}` : ''
+        ].filter(Boolean).join(' · ');
+        // Código fixo no id: tocar duas vezes no botão não cria máquina repetida.
+        ops.push(['salvar', 'maquinas', {
+          id: 'bem-' + chaveCodigo(b.codigo).toLowerCase(),
+          codigo: b.codigo, nome: b.nome, tipo: b.tipo, marca: b.marca, serie: b.serie,
+          fazendaId: fazendas[b.fazenda].id, status: 'disponivel', obs, origem: 'Relatório de Bens 28/11/2026'
+        }]);
+      }
+      const btn = $('#btn-importar'); btn.disabled = true; btn.textContent = 'Cadastrando…';
+      try {
+        await DB.lote(ops);
+        alert(`Pronto: ${escolhidos.length} cadastrados e confirmados no servidor.`);
+        location.hash = '#/maquinas';
+      } catch (err) {
+        alert(err.message); contar();
+      }
+    });
+  });
+  const grupos = {};
+  for (const i of itens) (grupos[i.tipo] = grupos[i.tipo] || []).push(i);
+  return `
+    <h2>Importar lista de bens</h2>
+    <p class="suave">Relatório de Bens de 28/11/2026: ${itens.length} itens das fazendas Lindos Campos e Bom Jesus.
+      Cada item entra na fazenda que o relatório indica, como "Na fazenda". Se algum estiver em outro lugar, faça a transferência depois.
+      Eletrodomésticos (freezer, geladeira, bebedouros) vêm desmarcados; marque se quiser controlar.</p>
+    <div class="cartao">
+      ${Object.values(fazendas).map((f) => `<div class="linha"><b>${esc(f.nome)}</b><span class="etiqueta ${f.nova ? 'e-transito' : 'e-ok'}">${f.nova ? 'Será cadastrada' : 'Já cadastrada'}</span></div>`).join('')}
+    </div>
+    ${jaTem ? `<div class="aviso">${jaTem} ${jaTem > 1 ? 'itens já estão' : 'item já está'} no app (mesmo código ou chassi) e não ${jaTem > 1 ? 'serão duplicados' : 'será duplicado'}.</div>` : ''}
+    ${novos.length ? '' : '<p class="vazio">Todos os itens da lista já estão cadastrados.</p>'}
+    <form id="form">
+      <div class="acoes"><button type="button" class="sec" id="marcar-todos">Marcar todos</button><button type="button" class="sec" id="desmarcar-todos">Desmarcar todos</button></div>
+      ${Object.entries(grupos).map(([tipo, lista]) => `
+        <h3 style="margin:18px 0 6px">${esc(tipo)} <span class="suave">(${lista.length})</span></h3>
+        ${lista.map((i) => `
+          <label class="cartao" style="display:flex;gap:10px;align-items:flex-start;margin:0 0 8px;cursor:pointer">
+            <input type="checkbox" name="bem" value="${esc(i.codigo)}" style="width:auto;margin-top:4px"
+              ${i.existente ? 'disabled' : TIPOS_DESMARCADOS.has(i.tipo) ? '' : 'checked'}>
+            <span style="flex:1;min-width:0">
+              <span class="linha"><b>${esc(i.codigo)} · ${esc(i.nome)}</b>${i.existente ? '<span class="etiqueta e-ok">Já cadastrada</span>' : ''}</span>
+              <span class="suave" style="display:block;overflow-wrap:anywhere">${esc(fazendas[i.fazenda].nome)}${i.marca ? ' · ' + esc(i.marca) : ''}${i.serie ? ' · ' + esc(i.serie) : ''}</span>
+              ${i.existente ? `<span class="suave" style="display:block">No app como: ${esc(nomeMaquina(d, i.existente.id))}</span>` : ''}
+            </span>
+          </label>`).join('')}`).join('')}
+      <div class="acoes"><button id="btn-importar">Cadastrar</button><a class="botao sec" href="#/mais">Cancelar</a></div>
+    </form>`;
+};
+
 // --- Mais: conta, usuários, fazendas, checklist, exportação ---
 telas.mais = async (_0, _1, ctx) => {
   const d = await carregarTudo();
@@ -856,8 +974,9 @@ telas.mais = async (_0, _1, ctx) => {
     <div class="acoes">
       <button class="sec" id="btn-backup">Baixar cópia</button>
       <label class="botao sec" style="margin:0">Importar backup<input type="file" id="inp-backup" accept=".json,application/json" hidden></label>
-    </div>` : ''}
-    <p class="suave" style="text-align:center;margin-top:24px">Controle de Transferências · v9</p>`;
+    </div>
+    <div class="acoes"><a class="botao" href="#/importar-bens">Importar lista de bens (Lindos Campos e Bom Jesus)</a></div>` : ''}
+    <p class="suave" style="text-align:center;margin-top:24px">Controle de Transferências · v10</p>`;
 };
 
 // --- Usuários (só administrador) ---
@@ -1060,6 +1179,7 @@ const rotas = [
   [/^\/fazendas\/([^/]+)\/editar$/, 'fazendaForm', 'mais'],
   [/^\/usuarios\/novo$/, 'usuarioNovo', 'mais'],
   [/^\/usuarios\/([^/]+)$/, 'usuario', 'mais'],
+  [/^\/importar-bens$/, 'importarBens', 'mais'],
   [/^\/mais$/, 'mais', 'mais']
 ];
 // Telas só de leitura: podem ser redesenhadas quando chega dado novo de outro aparelho.
