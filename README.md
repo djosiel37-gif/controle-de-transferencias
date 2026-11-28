@@ -2,7 +2,7 @@
 
 App para registrar a movimentação de máquinas e equipamentos entre fazendas e os envios para conserto na cidade, com checklist de saída e de chegada.
 
-Funciona no celular, inclusive **sem internet**, e sincroniza os dados entre todos os usuários quando há sinal. Pode ser instalado na tela inicial como um app.
+Funciona no celular e precisa de **internet**: só mostra "Salvo" depois que o servidor confirmar a gravação, para garantir que o dado chegou. Pode ser instalado na tela inicial como um app.
 
 ## O que faz
 
@@ -14,6 +14,7 @@ Funciona no celular, inclusive **sem internet**, e sincroniza os dados entre tod
 - **Exportação para planilha** (CSV que abre no Excel/Google Planilhas): transferências, consertos e máquinas.
 - **Login com níveis** (administrador e operador) e **dados compartilhados** entre os aparelhos.
 - **Checklist editável** em *Mais → Itens do checklist*.
+- **Alertas** na tela inicial: conserto com prazo vencido e máquina em trânsito há mais tempo que o limite (padrão 24 h, o administrador muda em *Mais → Alertas*).
 
 ### Checklist padrão
 
@@ -21,13 +22,15 @@ Horímetro/odômetro, nível de combustível, pneus/esteiras, óleo do motor, ó
 
 ## Login e dados compartilhados
 
-Os dados ficam num banco online (Firebase, do Google) e numa cópia em cada aparelho. Assim todo mundo vê as mesmas máquinas e registros, e o app continua funcionando **sem internet**: o que for lançado offline sobe sozinho quando o sinal voltar.
+Os dados ficam num banco online (Firebase, do Google), então todo mundo vê as mesmas máquinas e registros.
+
+**Só funciona com internet.** Sem sinal, o app bloqueia a tela. Cada gravação espera a confirmação do servidor (até 20 s); se não vier, aparece um aviso e nada é dado como salvo. Onde não pega sinal, anote no papel e lance depois.
 
 - **Administrador** (só um, criado no primeiro acesso): tudo, inclusive cadastrar fazendas e máquinas, criar e desativar usuários (só ele cria contas, e sempre como operador), editar o checklist, cancelar transferências e excluir consertos, importar backup.
 - **Operador**: lança transferências e consertos, registra chegada e retorno, vê tudo e exporta planilhas.
 - Login por **usuário e senha** (não precisa de e-mail). Cada registro guarda quem lançou.
-- Esqueceu a senha: o administrador desativa o usuário antigo e cria um novo. A própria pessoa pode trocar a senha em *Mais → Minha conta*.
-- O primeiro login e a criação de usuários precisam de internet. Depois de entrar uma vez, o app abre offline.
+- Esqueceu a senha (operador): o administrador desativa o usuário antigo e cria um novo. A própria pessoa pode trocar a senha em *Mais → Minha conta*.
+- Esqueceu a senha (administrador): cadastre antes um e-mail real em *Mais → Minha conta → E-mail para recuperar a senha* e confirme pelo link que chega. Depois disso o login do administrador passa a ser por esse e-mail, e na tela de login *Esqueci a senha* manda um link para criar outra.
 
 ### Configurar o Firebase (uma vez)
 
@@ -81,11 +84,11 @@ Para testar sem mexer no banco real, use o Firebase Emulator (`firebase emulator
 |---|---|
 | `index.html` | Página principal |
 | `app.js` | Telas e regras do app |
-| `db.js` | Login e dados (Firebase Auth + Firestore com cópia offline) |
+| `db.js` | Login e dados (Firebase Auth + Firestore, gravação confirmada no servidor) |
 | `firebase-config.js` | Identificação do projeto Firebase |
 | `firestore.rules` | Regras de acesso do banco (quem pode ler e gravar o quê) |
 | `firebase.json`, `.firebaserc`, `.github/workflows/publicar.yml` | Publicação no Firebase Hosting |
-| `vendor/firebase/` | SDK do Firebase 10.14.1, copiado para abrir sem internet |
+| `vendor/firebase/` | SDK do Firebase 10.14.1, copiado para o próprio site |
 | `styles.css` | Visual |
-| `sw.js` | Service worker (funcionamento offline). Ao alterar arquivos, aumente a `VERSAO` |
+| `sw.js` | Service worker (guarda os arquivos para abrir mais rápido). Ao alterar arquivos, aumente a `VERSAO` |
 | `manifest.webmanifest`, `icon.svg` | Instalação como app |

@@ -96,3 +96,9 @@ textarea { min-height: 70px; }
 .busca { margin-bottom: 12px; }
 @media (max-width: 420px) { .duas { grid-template-columns: 1fr; } }
 @media print { .abas, .topo, .acoes { display: none; } body { padding: 0; } }
+
+.tela-cheia { position: fixed; inset: 0; z-index: 20; background: var(--fundo); display: flex; align-items: center; justify-content: center; padding: 24px; text-align: center; }
+.tela-cheia > div { max-width: 360px; background: var(--cartao); border: 1px solid var(--borda); border-radius: 12px; padding: 20px; }
+.tela-cheia b { font-size: 1.15rem; }
+.tela-cheia.translucida { background: rgba(244, 246, 241, .85); }
+.tela-cheia[hidden] { display: none; }

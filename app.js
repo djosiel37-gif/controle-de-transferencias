@@ -207,16 +207,49 @@ const optFazendas = (d, sel, excluir) =>
 // ---------- Telas ----------
 const telas = {};
 
+// ---------- Alertas ----------
+const HORAS_TRANSITO_PADRAO = 24;
+async function calcularAlertas(d) {
+  const cfg = (await DB.obter('config', 'alertas')) || {};
+  const horas = Number(cfg.horasTransito) || HORAS_TRANSITO_PADRAO;
+  const hoje = hojeISO().slice(0, 10);
+  const agora = Date.now();
+  const lista = [];
+  for (const c of d.consertos.filter((x) => x.status === 'oficina' && x.prazo && x.prazo < hoje)) {
+    const dias = Math.round((new Date(hoje) - new Date(c.prazo)) / 86400000);
+    lista.push({ href: `#/consertos/${c.id}`, tipo: 'e-erro',
+      texto: `${nomeMaquina(d, c.maquinaId)}: conserto em ${c.oficina} com prazo vencido há ${dias} dia${dias > 1 ? 's' : ''}` });
+  }
+  for (const t of d.transferencias.filter((x) => x.status === 'transito')) {
+    const h = (agora - new Date(t.dataSaida).getTime()) / 3600000;
+    if (h >= horas) lista.push({ href: `#/transferencias/${t.id}`, tipo: 'e-transito',
+      texto: `${nomeMaquina(d, t.maquinaId)}: em trânsito há ${h >= 48 ? Math.floor(h / 24) + ' dias' : Math.floor(h) + ' horas'} (${nomeFazenda(d, t.origemId)} → ${nomeFazenda(d, t.destinoId)}), sem registro de chegada` });
+  }
+  if (sessao.admin && !sessao.emailReal) lista.push({ href: '#/mais', tipo: 'e-conserto',
+    texto: 'Cadastre um e-mail para recuperar sua senha (Mais → Minha conta)' });
+  return { lista, horas };
+}
+async function atualizarSelo() {
+  try {
+    const { lista } = await calcularAlertas(await carregarTudo());
+    const a = $('.abas a[data-aba="inicio"]');
+    if (a) a.textContent = lista.length ? `Início (${lista.length})` : 'Início';
+  } catch {}
+}
+
 telas.inicio = async (_0, _1, ctx) => {
   const d = await carregarTudo();
+  const { lista: alertas } = await calcularAlertas(d);
   const transito = d.transferencias.filter((t) => t.status === 'transito').sort(porData('dataSaida'));
   const oficina = d.consertos.filter((c) => c.status === 'oficina').sort(porData('dataEnvio'));
-  const hoje = new Date().toISOString().slice(0, 10);
+  const hoje = hojeISO().slice(0, 10);
   const semCadastro = !d.fazendas.length
     ? (sessao.admin ? `<div class="aviso">Comece cadastrando as fazendas em <a href="#/mais">Mais → Fazendas</a> e depois as máquinas.</div>`
       : `<div class="aviso">Ainda não há fazendas cadastradas. Peça ao administrador.</div>`) : '';
   return `
     ${semCadastro}
+    ${alertas.length ? `<h3 style="margin-top:0">⚠️ Atenção (${alertas.length})</h3>
+      ${alertas.map((a) => `<a class="cartao" href="${a.href}" style="border-left:4px solid var(--${a.tipo === 'e-erro' ? 'erro' : a.tipo === 'e-transito' ? 'azul' : 'alerta'})">${esc(a.texto)}</a>`).join('')}` : ''}
     <div class="resumo">
       <a class="cartao" href="#/maquinas"><b>${d.maquinas.length}</b><span class="suave">máquinas</span></a>
       <a class="cartao" href="#/transferencias"><b>${transito.length}</b><span class="suave">em trânsito</span></a>
@@ -382,8 +415,7 @@ telas.transferenciaNova = async (_, params, ctx) => {
         saida: await lerChecklist(form, itens, 'saida'),
         status: 'transito'
       };
-      await DB.salvar('transferencias', t);
-      await DB.salvar('maquinas', { ...m, status: 'transito' });
+      await DB.lote([['salvar', 'transferencias', t], ['salvar', 'maquinas', { ...m, status: 'transito' }]]);
       location.hash = `#/transferencias/${t.id}`;
     });
   });
@@ -415,10 +447,9 @@ function ultimaMovimentacao(d, maquinaId, idRegistro) {
 }
 async function cancelarRegistro(d, loja, reg, msg) {
   if (!confirm(msg)) return;
-  await DB.remover(loja, reg.id);
-  for (const ck of [reg.saida, reg.chegada, reg.retorno]) (ck && ck.fotoIds || []).forEach(DB.removerFoto);
   const m = d.mq[reg.maquinaId];
-  if (m) await DB.salvar('maquinas', { ...m, status: 'disponivel', fazendaId: reg.origemId });
+  await DB.lote([['remover', loja, reg.id], ...(m ? [['salvar', 'maquinas', { ...m, status: 'disponivel', fazendaId: reg.origemId }]] : [])]);
+  for (const ck of [reg.saida, reg.chegada, reg.retorno]) (ck && ck.fotoIds || []).forEach(DB.removerFoto);
   location.hash = m ? `#/maquinas/${m.id}` : '#/';
 }
 
@@ -461,9 +492,8 @@ telas.transferenciaChegada = async (id, _1, ctx) => {
       e.preventDefault();
       t.chegada = await lerChecklist(form, itens, 'chegada');
       t.status = 'recebida';
-      await DB.salvar('transferencias', t);
       const m = d.mq[t.maquinaId];
-      if (m) await DB.salvar('maquinas', { ...m, status: 'disponivel', fazendaId: t.destinoId });
+      await DB.lote([['salvar', 'transferencias', t], ...(m ? [['salvar', 'maquinas', { ...m, status: 'disponivel', fazendaId: t.destinoId }]] : [])]);
       location.hash = `#/transferencias/${t.id}`;
     });
   });
@@ -481,7 +511,7 @@ telas.transferenciaChegada = async (id, _1, ctx) => {
 telas.consertos = async (_0, _1, ctx) => {
   const d = await carregarTudo();
   const lista = d.consertos.sort(porData('dataEnvio'));
-  const hoje = new Date().toISOString().slice(0, 10);
+  const hoje = hojeISO().slice(0, 10);
   return `
     <div class="linha"><h2>Consertos na cidade</h2><a class="botao" href="#/consertos/novo">+ Enviar</a></div>
     ${lista.length ? lista.map((c) => {
@@ -521,8 +551,7 @@ telas.consertoNovo = async (_, params, ctx) => {
         saida: await lerChecklist(form, itens, 'saida'),
         status: 'oficina'
       };
-      await DB.salvar('consertos', c);
-      await DB.salvar('maquinas', { ...m, status: 'conserto' });
+      await DB.lote([['salvar', 'consertos', c], ['salvar', 'maquinas', { ...m, status: 'conserto' }]]);
       location.hash = `#/consertos/${c.id}`;
     });
   });
@@ -614,9 +643,8 @@ telas.consertoRetorno = async (id, _1, ctx) => {
       c.servico = fd.get('servico');
       c.destinoId = fd.get('destinoId');
       c.status = 'retornou';
-      await DB.salvar('consertos', c);
       const m = d.mq[c.maquinaId];
-      if (m) await DB.salvar('maquinas', { ...m, status: 'disponivel', fazendaId: c.destinoId });
+      await DB.lote([['salvar', 'consertos', c], ...(m ? [['salvar', 'maquinas', { ...m, status: 'disponivel', fazendaId: c.destinoId }]] : [])]);
       location.hash = `#/consertos/${c.id}`;
     });
   });
@@ -667,6 +695,7 @@ telas.mais = async (_0, _1, ctx) => {
   const adm = sessao.admin;
   const eu = sessao.perfil || {};
   const antigos = adm ? await lerBancoAntigo() : null;
+  const cfgAlertas = (await DB.obter('config', 'alertas')) || {};
   ctx.depois(() => {
     $('#btn-sair').onclick = async () => { if (confirm('Sair da conta neste aparelho?')) await sessao.sair(); };
     $('#form-senha').addEventListener('submit', async (e) => {
@@ -675,6 +704,16 @@ telas.mais = async (_0, _1, ctx) => {
       if (f.nova.value !== f.nova2.value) return alert('A senha nova e a confirmação não batem.');
       try { await sessao.trocarSenha(f.atual.value, f.nova.value); alert('Senha trocada.'); f.reset(); }
       catch (err) { alert(err.message); }
+    });
+    const fe = $('#form-email');
+    if (fe) fe.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = fe.email.value.trim();
+      try {
+        await sessao.cadastrarEmail(fe.atual.value, email);
+        alert(`Enviamos um link de confirmação para ${email}. Abra o e-mail e confirme (veja o spam).\n\nDepois de confirmar, você passa a entrar com o e-mail ${email} no lugar do usuário, com a mesma senha.`);
+        fe.reset();
+      } catch (err) { alert(err.message); }
     });
     $('#btn-csv-t').onclick = () => exportarTransferencias(d);
     $('#btn-csv-c').onclick = () => exportarConsertos(d);
@@ -703,6 +742,13 @@ telas.mais = async (_0, _1, ctx) => {
       $('#ck-lista').insertAdjacentHTML('beforeend', linhaCk({ id: 'i' + Date.now().toString(36), rotulo: '', tipo: 'ok' }));
     };
     $('#ck-lista').addEventListener('click', (e) => { if (e.target.matches('.ck-del')) e.target.closest('.ck-linha').remove(); });
+    $('#form-alertas').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const h = Number(e.target.horas.value);
+      if (!(h >= 1)) return alert('Informe um número de horas (mínimo 1).');
+      await DB.salvar('config', { ...(await DB.obter('config', 'alertas')), id: 'alertas', horasTransito: h });
+      alert('Salvo.');
+    });
     $('#ck-reset').onclick = async () => {
       if (!confirm('Voltar para o checklist padrão?')) return;
       await DB.remover('config', 'checklist');
@@ -729,6 +775,16 @@ telas.mais = async (_0, _1, ctx) => {
           <div class="acoes"><button>Trocar senha</button></div>
         </form>
       </details>
+      ${adm ? `<details style="margin-top:8px" ${sessao.emailReal ? '' : 'open'}><summary>E-mail para recuperar a senha</summary>
+        ${sessao.emailReal
+          ? `<p>Cadastrado: <b>${esc(sessao.emailReal)}</b>. Você entra com esse e-mail. Se esquecer a senha, use "Esqueci a senha" na tela de entrada.</p>`
+          : `<div class="aviso" style="margin-top:8px">Você é o único administrador. Sem um e-mail cadastrado, se esquecer a senha não há como recuperar.</div>`}
+        <form id="form-email">
+          <label>${sessao.emailReal ? 'Trocar para outro e-mail' : 'Seu e-mail'}</label><input type="email" name="email" required autocomplete="email">
+          <label>Sua senha atual</label><input type="password" name="atual" required autocomplete="current-password">
+          <div class="acoes"><button>Enviar confirmação</button></div>
+        </form>
+      </details>` : ''}
       <div class="acoes"><button class="sec" id="btn-sair">Sair</button></div>
     </div>
 
@@ -758,6 +814,13 @@ telas.mais = async (_0, _1, ctx) => {
       <button type="button" class="sec" id="ck-reset" style="width:100%">Restaurar padrão</button>
     </form>` : ''}
 
+    ${adm ? `<h2 style="margin-top:24px">Alertas</h2>
+    <form id="form-alertas" class="cartao">
+      <p class="suave" style="margin-top:0">Conserto com prazo vencido sempre gera alerta. Transferência sem chegada registrada gera alerta depois de:</p>
+      <div class="linha" style="flex-wrap:nowrap"><input name="horas" type="number" min="1" step="1" value="${esc(cfgAlertas.horasTransito || HORAS_TRANSITO_PADRAO)}" style="max-width:120px"> <span>horas</span>
+        <button class="sec">Salvar</button></div>
+    </form>` : ''}
+
     <h2 style="margin-top:24px">Exportar planilhas (CSV)</h2>
     <p class="suave">Abre no Excel ou Google Planilhas.</p>
     <div class="acoes">
@@ -776,7 +839,7 @@ telas.mais = async (_0, _1, ctx) => {
       <button class="sec" id="btn-backup">Baixar cópia</button>
       <label class="botao sec" style="margin:0">Importar backup<input type="file" id="inp-backup" accept=".json,application/json" hidden></label>
     </div>` : ''}
-    <p class="suave" style="text-align:center;margin-top:24px">Controle de Transferências · v7</p>`;
+    <p class="suave" style="text-align:center;margin-top:24px">Controle de Transferências · v8</p>`;
 };
 
 // --- Usuários (só administrador) ---
@@ -927,7 +990,7 @@ async function importarDados(dados) {
         await DB.salvar(l, obj);
       }
     }
-    alert('Importado. Se estiver sem internet, os dados sobem quando o sinal voltar.');
+    alert('Importado e confirmado no servidor.');
     location.hash = '#/';
     return true;
 }
@@ -1006,6 +1069,7 @@ async function render({ manterRolagem = false } = {}) {
     $('#app').innerHTML = html;
     fila.forEach((fn) => fn());
     carregarFotos();
+    atualizarSelo();
   } catch (err) {
     console.error(err);
     $('#app').innerHTML = `<div class="aviso">Erro ao abrir a tela: ${esc(err.message)}</div>`;
@@ -1032,13 +1096,23 @@ function carregarFotos() {
 // Dado novo chegou (de outro aparelho ou desta gravação): atualiza a tela se ela for só de leitura
 // e a pessoa não estiver digitando.
 let agendado = null;
-DB.aoMudar(() => {
+DB.aoMudar((loja) => {
+  if (loja === '__gravando__') return mostrarGravando();
   clearTimeout(agendado);
   agendado = setTimeout(() => {
+    atualizarSelo();
     const digitando = document.activeElement && document.activeElement.closest('#app form');
     if (TELAS_AO_VIVO.has(telaAtual) && !digitando) render({ manterRolagem: true });
   }, 250);
 });
+
+// Alertas dependem da hora: confere de novo a cada 10 minutos.
+setInterval(() => {
+  if (!sessao.perfil) return;
+  atualizarSelo();
+  const digitando = document.activeElement && document.activeElement.closest('#app form');
+  if (telaAtual === 'inicio' && !digitando) render({ manterRolagem: true });
+}, 10 * 60 * 1000);
 
 // ---------- Login ----------
 function mostrarNavegacao(sim) {
@@ -1062,9 +1136,18 @@ function telaLogin(primeiroAcesso = false) {
     <h2>Entrar</h2>
     <form id="form-login">
       <label>Usuário</label><input name="usuario" required autocapitalize="none" autocomplete="username">
+      <div class="suave">Se você cadastrou e-mail de recuperação, entre com o e-mail.</div>
       <label>Senha</label><input type="password" name="senha" required autocomplete="current-password">
       <div class="acoes"><button>Entrar</button></div>
-      <p class="suave" style="text-align:center">Esqueceu a senha? Fale com o administrador.</p>
+    </form>
+    <details class="cartao" style="margin-top:12px"><summary>Esqueci a senha</summary>
+      <p class="suave">Operador: fale com o administrador. Administrador: informe o e-mail de recuperação cadastrado.</p>
+      <form id="form-recuperar">
+        <input type="email" name="email" required placeholder="seu@email.com" autocomplete="email">
+        <div class="acoes"><button class="sec">Enviar link para trocar a senha</button></div>
+      </form>
+    </details>
+    <form>
       <p style="text-align:center" id="p-primeiro" hidden><a href="#" id="lnk-primeiro">Primeiro acesso (criar administrador)</a></p>
     </form>`;
   const f = $('#form-login');
@@ -1073,6 +1156,14 @@ function telaLogin(primeiroAcesso = false) {
   // "Primeiro acesso" só aparece enquanto não existe administrador.
   if (lp) sessao.existeAdmin().then((existe) => { if (existe !== true && $('#p-primeiro')) $('#p-primeiro').hidden = false; });
   if (lv) lv.onclick = (e) => { e.preventDefault(); telaLogin(false); };
+  const fr = $('#form-recuperar');
+  if (fr) fr.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await sessao.recuperarSenha(fr.email.value);
+      alert('Se esse e-mail estiver cadastrado, chega um link para criar uma senha nova. Veja também o spam.');
+    } catch (err) { alert(err.message); }
+  });
   f.addEventListener('submit', async (e) => {
     e.preventDefault();
     const b = $('button', f); b.disabled = true;
@@ -1111,10 +1202,20 @@ if (location.hostname.endsWith('github.io')) {
   document.body.insertBefore(aviso, $('#app'));
 }
 
+// O app só funciona com internet, para garantir que tudo que aparece como salvo está no servidor.
 function statusRede() {
-  const el = $('#status-rede');
-  el.textContent = navigator.onLine ? 'online' : 'offline';
+  const on = navigator.onLine;
+  $('#status-rede').textContent = on ? 'online' : 'sem internet';
+  $('#bloqueio-rede').hidden = on;
 }
+function mostrarGravando() {
+  $('#gravando').hidden = !DB.gravando;
+}
+// Erro numa gravação (sem internet, servidor não confirmou, sem permissão): avisa e não avança.
+window.addEventListener('unhandledrejection', (e) => {
+  const msg = e.reason && e.reason.message;
+  if (msg) { e.preventDefault(); alert(msg); }
+});
 
 window.addEventListener('hashchange', () => render());
 window.addEventListener('online', statusRede);
