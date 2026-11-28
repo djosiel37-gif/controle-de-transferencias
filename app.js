@@ -22,6 +22,16 @@ const dataBR = (iso) => {
 };
 const reais = (v) =>
   v === '' || v == null || isNaN(Number(v)) ? '—' : Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+// Ícones de traço (SVG) usados nas telas.
+const ICONES = {
+  alerta: '<path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>',
+  maquina: '<circle cx="7" cy="17" r="3"/><circle cx="18" cy="18" r="2"/><path d="M4 14V8h7l2 6M11 8V5h4l2 6h3v5h-2M10 17h6"/>',
+  transito: '<path d="M4 8h14l-4-4M20 16H6l4 4"/>',
+  conserto: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3 17.8V21h3.2l6.3-6.3a4 4 0 0 0 5.2-5.4l-2.5 2.5-2.5-.5-.5-2.5z"/>',
+  seta: '<path d="m9 6 6 6-6 6"/>',
+  mais: '<path d="M12 5v14M5 12h14"/>'
+};
+const icone = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONES[n]}</svg>`;
 const num = (v) => (v === '' || v == null ? '' : Number(String(v).replace(',', '.')));
 
 // ---------- Checklist padrão (editável em "Mais") ----------
@@ -232,10 +242,12 @@ async function calcularAlertas(d) {
 async function atualizarSelo() {
   try {
     const { lista } = await calcularAlertas(await carregarTudo());
-    const a = $('.abas a[data-aba="inicio"]');
-    if (a) a.textContent = lista.length ? `Início (${lista.length})` : 'Início';
+    const selo = $('.abas a[data-aba="inicio"] .selo');
+    if (selo) { selo.textContent = lista.length; selo.hidden = !lista.length; }
   } catch {}
 }
+
+const saudacao = () => { const h = new Date().getHours(); return h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite'; };
 
 telas.inicio = async (_0, _1, ctx) => {
   const d = await carregarTudo();
@@ -248,16 +260,22 @@ telas.inicio = async (_0, _1, ctx) => {
       : `<div class="aviso">Ainda não há fazendas cadastradas. Peça ao administrador.</div>`) : '';
   return `
     ${semCadastro}
-    ${alertas.length ? `<h3 style="margin-top:0">⚠️ Atenção (${alertas.length})</h3>
-      ${alertas.map((a) => `<a class="cartao" href="${a.href}" style="border-left:4px solid var(--${a.tipo === 'e-erro' ? 'erro' : a.tipo === 'e-transito' ? 'azul' : 'alerta'})">${esc(a.texto)}</a>`).join('')}` : ''}
+    <div class="saudacao">
+      <h2>${saudacao()}, ${esc(sessao.perfil.nome.split(' ')[0])}</h2>
+      <div class="suave">${((x) => x[0].toUpperCase() + x.slice(1))(new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }))}</div>
+    </div>
+    ${alertas.length ? `<div class="alertas">
+      <div class="cab">${icone('alerta', 'peq')} Precisa de atenção (${alertas.length})</div>
+      ${alertas.map((a) => `<a href="${a.href}"><span class="marcador" style="--cor:var(--${a.tipo === 'e-erro' ? 'erro' : a.tipo === 'e-transito' ? 'azul' : 'alerta'})"></span><span>${esc(a.texto)}</span>${icone('seta', 'peq')}</a>`).join('')}
+    </div>` : ''}
     <div class="resumo">
-      <a class="cartao" href="#/maquinas"><b>${d.maquinas.length}</b><span class="suave">máquinas</span></a>
-      <a class="cartao" href="#/transferencias"><b>${transito.length}</b><span class="suave">em trânsito</span></a>
-      <a class="cartao" href="#/consertos"><b>${oficina.length}</b><span class="suave">em conserto</span></a>
+      <a class="cartao" href="#/maquinas">${icone('maquina')}<b>${d.maquinas.length}</b><span class="suave">máquinas</span></a>
+      <a class="cartao k-transito" href="#/transferencias">${icone('transito')}<b>${transito.length}</b><span class="suave">em trânsito</span></a>
+      <a class="cartao k-conserto" href="#/consertos">${icone('conserto')}<b>${oficina.length}</b><span class="suave">em conserto</span></a>
     </div>
     <div class="acoes">
-      <a class="botao" href="#/transferencias/nova">Nova transferência</a>
-      <a class="botao sec" href="#/consertos/novo">Enviar p/ conserto</a>
+      <a class="botao" href="#/transferencias/nova">${icone('transito', 'peq')} Nova transferência</a>
+      <a class="botao sec" href="#/consertos/novo">${icone('conserto', 'peq')} Enviar p/ conserto</a>
     </div>
     <h3>Aguardando recebimento</h3>
     ${transito.length ? transito.map((t) => `
@@ -839,7 +857,7 @@ telas.mais = async (_0, _1, ctx) => {
       <button class="sec" id="btn-backup">Baixar cópia</button>
       <label class="botao sec" style="margin:0">Importar backup<input type="file" id="inp-backup" accept=".json,application/json" hidden></label>
     </div>` : ''}
-    <p class="suave" style="text-align:center;margin-top:24px">Controle de Transferências · v8</p>`;
+    <p class="suave" style="text-align:center;margin-top:24px">Controle de Transferências · v9</p>`;
 };
 
 // --- Usuários (só administrador) ---
@@ -1117,14 +1135,18 @@ setInterval(() => {
 // ---------- Login ----------
 function mostrarNavegacao(sim) {
   $('.abas').style.display = sim ? '' : 'none';
-  $('#usuario-topo').textContent = sim && sessao.perfil ? sessao.perfil.nome.split(' ')[0] : '';
+  const av = $('#usuario-topo'), p = sim && sessao.perfil;
+  av.hidden = !p;
+  av.textContent = p ? p.nome.trim().split(/\s+/).filter((_, i, a) => i === 0 || i === a.length - 1).map((x) => x[0]).join('').toUpperCase() : '';
+  av.title = p ? p.nome : '';
 }
 
 function telaLogin(primeiroAcesso = false) {
   mostrarNavegacao(false);
   telaAtual = 'login';
-  $('#app').innerHTML = primeiroAcesso ? `
-    <h2>Primeiro acesso</h2>
+  const logo = (titulo, sub) => `<div class="logo"><img src="icon.svg" alt=""><h2>${titulo}</h2><p>${sub}</p></div>`;
+  $('#app').innerHTML = `<div class="entrada">` + (primeiroAcesso ? `
+    ${logo('Primeiro acesso', 'Controle de Transferências')}
     <p class="suave">Crie a conta do administrador. Isso só funciona uma vez; depois, o administrador cria os outros usuários pelo app.</p>
     <form id="form-login">
       <label>Seu nome completo</label><input name="nome" required>
@@ -1133,8 +1155,8 @@ function telaLogin(primeiroAcesso = false) {
       <div class="acoes"><button>Criar administrador</button></div>
       <p style="text-align:center"><a href="#" id="lnk-voltar">Voltar para o login</a></p>
     </form>` : `
-    <h2>Entrar</h2>
-    <form id="form-login">
+    ${logo('Controle de Transferências', 'Máquinas, fazendas e consertos')}
+    <form id="form-login" class="cartao">
       <label>Usuário</label><input name="usuario" required autocapitalize="none" autocomplete="username">
       <div class="suave">Se você cadastrou e-mail de recuperação, entre com o e-mail.</div>
       <label>Senha</label><input type="password" name="senha" required autocomplete="current-password">
@@ -1149,7 +1171,8 @@ function telaLogin(primeiroAcesso = false) {
     </details>
     <form>
       <p style="text-align:center" id="p-primeiro" hidden><a href="#" id="lnk-primeiro">Primeiro acesso (criar administrador)</a></p>
-    </form>`;
+    </form>
+    <p class="rodape">Cada registro só é confirmado depois de chegar ao servidor.</p>`) + `</div>`;
   const f = $('#form-login');
   const lp = $('#lnk-primeiro'), lv = $('#lnk-voltar');
   if (lp) lp.onclick = (e) => { e.preventDefault(); telaLogin(true); };
@@ -1205,7 +1228,9 @@ if (location.hostname.endsWith('github.io')) {
 // O app só funciona com internet, para garantir que tudo que aparece como salvo está no servidor.
 function statusRede() {
   const on = navigator.onLine;
-  $('#status-rede').textContent = on ? 'online' : 'sem internet';
+  const p = $('#status-rede');
+  p.classList.toggle('off', !on);
+  p.title = on ? 'Conectado' : 'Sem internet';
   $('#bloqueio-rede').hidden = on;
 }
 function mostrarGravando() {

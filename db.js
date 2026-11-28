@@ -208,10 +208,12 @@ const quem = () => (perfil ? { uid: perfil.id, nome: perfil.nome } : null);
 const PRAZO_SERVIDOR = 20000;
 let gravando = 0;
 const avisarGravando = () => avisar('dados', '__gravando__');
-async function confirmar(promessa) {
+// Recebe uma função (não a promessa) para checar a internet ANTES de pôr a gravação na fila.
+async function confirmar(gravar) {
   if (!navigator.onLine) throw new Error('Sem internet. Nada foi salvo. Conecte-se e tente de novo.');
   gravando++; avisarGravando();
   try {
+    const promessa = gravar();
     let t;
     const prazo = new Promise((_, rej) => { t = setTimeout(() => rej(new Error(
       'O servidor não confirmou a gravação (internet fraca). Não feche o app e confira em instantes se o registro aparece; se não aparecer, faça de novo.'
@@ -239,24 +241,25 @@ export const DB = {
   get gravando() { return gravando > 0; },
   salvar: async (loja, obj) => {
     const { id, dados } = carimbar(obj);
-    await confirmar(setDoc(doc(db, loja, id), dados));
+    await confirmar(() => setDoc(doc(db, loja, id), dados));
     return obj;
   },
-  remover: (loja, id) => confirmar(deleteDoc(doc(db, loja, id))),
+  remover: (loja, id) => confirmar(() => deleteDoc(doc(db, loja, id))),
   // Várias gravações juntas: ou todas entram, ou nenhuma (ex.: transferência + situação da máquina).
   // ops: [['salvar', loja, obj] | ['remover', loja, id]]
   lote: async (ops) => {
+    if (!navigator.onLine) return confirmar(() => null);
     const b = writeBatch(db);
     for (const [acao, loja, x] of ops) {
       if (acao === 'remover') b.delete(doc(db, loja, x));
       else { const { id, dados } = carimbar(x); b.set(doc(db, loja, id), dados); }
     }
-    await confirmar(b.commit());
+    await confirmar(() => b.commit());
   },
   // Fotos ficam numa coleção própria (cada documento do Firestore aceita no máximo 1 MB).
   salvarFoto: async (dataURL) => {
     const id = novoId();
-    await confirmar(setDoc(doc(db, 'fotos', id), { dados: dataURL, criadoPor: quem(), criadoEm: new Date().toISOString() }));
+    await confirmar(() => setDoc(doc(db, 'fotos', id), { dados: dataURL, criadoPor: quem(), criadoEm: new Date().toISOString() }));
     return id;
   },
   foto: async (id) => {
